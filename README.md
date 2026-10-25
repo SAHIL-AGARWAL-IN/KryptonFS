@@ -14,7 +14,7 @@ model and full project layout.
 | Phase | Scope                                              | State   |
 |-------|----------------------------------------------------|---------|
 | 1     | Scaffolding, wire formats, IPC layout, config      | done    |
-| 2     | Cryptography and malware scanner                   | planned |
+| 2     | Cryptography, node keys and malware scanner        | done    |
 | 3     | FUSE driver, sandbox workers, IPC                  | planned |
 | 4     | Storage node server, replication, heartbeats       | planned |
 | 5     | Telemetry and dashboard                            | planned |
@@ -55,6 +55,20 @@ make test
 
 `--device /dev/fuse` and `SYS_ADMIN` are needed to mount FUSE filesystems.
 Docker's default capabilities already cover `chroot` and `setuid`.
+
+## Keys
+
+Each host needs an RSA-2048 identity, and the cluster shares one
+heartbeat key:
+
+```sh
+kfs-keygen node 1 /etc/kryptonfs/keys          # node.key.pem + 1.pub.pem
+kfs-keygen cluster /etc/kryptonfs/keys/cluster.key
+```
+
+Copy every host's `<id>.pub.pem` into each peer's `trusted_keys`
+directory; handshakes from unpinned keys are refused. `kfs-keygen` never
+overwrites existing files.
 
 ## Configuration
 

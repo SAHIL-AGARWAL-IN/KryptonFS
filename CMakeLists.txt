@@ -31,8 +31,13 @@ endif()
 
 include(cmake/KryptonDefaults.cmake)
 
+find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
+
 add_subdirectory(src/common)
-# Later phases add: src/crypto, src/scanner (2); src/sandbox, src/fuse (3);
+add_subdirectory(src/crypto)
+add_subdirectory(src/scanner)
+add_subdirectory(tools)
+# Later phases add: src/sandbox, src/fuse (3);
 # src/net, src/node (4); src/telemetry (5).
 
 if(KFS_BUILD_TESTS)

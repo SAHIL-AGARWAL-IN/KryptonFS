@@ -138,7 +138,8 @@ KryptonFS/
 │   ├── krypton_protocol.h             [P1] RPC frame, envelope, heartbeat formats
 │   ├── krypton_ipc.h                  [P1] IPC descriptors, shared arena layout
 │   ├── krypton_config.h               [P1] configuration structs + loader API
-│   ├── krypton_crypto.h               [P2] AES-CTR, HMAC, PBKDF2/HKDF, RSA, X25519
+│   ├── krypton_crypto.h               [P2] AES-CTR, HMAC, PBKDF2/HKDF, frame + heartbeat MACs
+│   ├── krypton_keystore.h             [P2] RSA-2048 identities, pinned peers, secret files
 │   ├── krypton_scanner.h              [P2] malware signature engine
 │   ├── krypton_sandbox.h              [P3] worker pools, privilege drop
 │   ├── krypton_cache.h                [P3] mmap page cache
@@ -150,12 +151,11 @@ KryptonFS/
 │   │   ├── krypton_config.c
 │   │   ├── krypton_ipc.c
 │   │   └── krypton_protocol.c
-│   ├── crypto/                        [P2] libkfs_crypto (OpenSSL)
-│   │   ├── krypton_crypto.c           block seal/open, key hierarchy
-│   │   └── krypton_keystore.c         RSA key loading and pinning
-│   ├── scanner/                       [P2]
-│   │   ├── malware_scanner.c          ELF header + signature inspection
-│   │   └── signatures.c               Aho-Corasick multi-pattern matcher
+│   ├── crypto/                        [P2] libkfs_crypto (OpenSSL 3)
+│   │   ├── krypton_crypto.c           block seal/open, key hierarchy, MACs
+│   │   └── krypton_keystore.c         RSA-PSS sign/verify, key files, pinning
+│   ├── scanner/                       [P2] libkfs_scanner
+│   │   └── malware_scanner.c          ELF header check, Aho-Corasick signature matcher
 │   ├── sandbox/                       [P3]
 │   │   ├── sandbox_worker.c           fork, chroot, setgid/setuid, worker loop
 │   │   └── ipc_channel.c              msgget/msgsnd/msgrcv, arena mmap
@@ -196,7 +196,8 @@ KryptonFS/
     ├── test_config.c                  [P1]
     ├── test_ipc.c                     [P1]
     ├── test_protocol.c                [P1]
-    ├── test_crypto.c                  [P2] includes NIST/RFC test vectors
+    ├── test_crypto.c                  [P2] NIST / RFC test vectors, tamper cases
+    ├── test_keystore.c                [P2]
     ├── test_scanner.c                 [P2]
     ├── test_sandbox.c                 [P3]
     └── integration/                   [P4] multi-node cluster scripts
