@@ -28,6 +28,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(test_sandbox PRIVATE kfs::sandbox)
     kfs_apply_defaults(test_sandbox)
     add_test(NAME sandbox COMMAND test_sandbox)
+
+    add_executable(test_fs test_fs.c)
+    target_link_libraries(test_fs PRIVATE kfs::fs)
+    kfs_apply_defaults(test_fs)
+    add_test(NAME fs COMMAND test_fs)
 endif()
 
 # The shipped example configuration must always load and validate.

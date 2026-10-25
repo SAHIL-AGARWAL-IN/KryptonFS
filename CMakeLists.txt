@@ -41,6 +41,7 @@ add_subdirectory(tools)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(Threads REQUIRED)
     add_subdirectory(src/sandbox)
+    add_subdirectory(src/fs)
 endif()
 # Later phases add: src/fuse (3);
 # src/net, src/node (4); src/telemetry (5).

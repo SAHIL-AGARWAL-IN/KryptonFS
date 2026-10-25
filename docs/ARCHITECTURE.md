@@ -89,10 +89,30 @@ ephemeral X25519 shares with them, then derives the session key.
 | Spoofed heartbeats        | HMAC with the cluster key plus a monotonic sequence number per node.      |
 | Malicious file content    | Parsed only in scan workers: no keys, chrooted, unprivileged.             |
 
+### Rollback and crash safety
+
+Metadata records the generation of every data block, and a read whose
+authenticated generation differs is refused, so a node cannot serve an
+older, validly tagged copy of a block. Generations come from one
+volume-wide counter and are never reused.
+
+Every block has two storage copies, selected by generation parity (bit 0
+of the block id). A rewrite always targets the copy the *committed*
+metadata does not reference, and metadata commits alternate copies the
+same way, writing chunks first and the root last. A crash at any point
+therefore leaves the previous commit fully readable. Storage freed by
+unlink or truncate is deleted only after the next commit lands.
+
 Known limits, to address in later phases:
 
-- **Rollback.** A node can serve an *older* validly tagged envelope. The
-  client must track each block's latest generation in its metadata.
+- **Whole-volume rollback.** Storage can still replace *every* object with
+  a complete, older committed state, since the client keeps no local
+  record of the latest metadata generation. Pinning the last-seen
+  generation on the client (or a signed counter on a quorum of nodes)
+  would close this.
+- **Access patterns.** Block ids expose inode numbers and block indexes,
+  so storage nodes learn file count and approximate sizes (never names or
+  contents). Keyed block-id hashing would hide this.
 - **Compromised crypto worker.** It holds the keys. Its input is fixed-size
   buffers with no parsing, which keeps that surface small; a seccomp-bpf
   allowlist would shrink it further.
@@ -142,7 +162,12 @@ KryptonFS/
 │   ├── krypton_keystore.h             [P2] RSA-2048 identities, pinned peers, secret files
 │   ├── krypton_scanner.h              [P2] malware signature engine
 │   ├── krypton_sandbox.h              [P3] worker pools, privilege drop
+│   ├── krypton_volume.h               [P3] volume header, block id layout
+│   ├── krypton_backend.h              [P3] block storage interface
+│   ├── krypton_blockio.h              [P3] seal/store, fetch/verify/open
+│   ├── krypton_meta.h                 [P3] inode table, crash-safe commits
 │   ├── krypton_cache.h                [P3] mmap page cache
+│   ├── krypton_fs.h                   [P3] filesystem operations
 │   ├── krypton_rpc.h                  [P4] RPC client/server, handshake
 │   └── krypton_telemetry.h            [P5] metrics and audit events
 ├── src/
@@ -158,11 +183,15 @@ KryptonFS/
 │   │   └── malware_scanner.c          ELF header check, Aho-Corasick signature matcher
 │   ├── sandbox/                       [P3] libkfs_sandbox (Linux)
 │   │   └── sandbox_worker.c           worker pools, jail, msg queues, arena, supervisor
+│   ├── fs/                            [P3] libkfs_fs (Linux): FUSE-independent core
+│   │   ├── krypton_volume.c           header creation, passphrase unlock
+│   │   ├── backend_local.c            directory block store (atomic puts)
+│   │   ├── krypton_blockio.c          encrypted block I/O
+│   │   ├── krypton_meta.c             inode table, serialization, commits
+│   │   ├── krypton_cache.c            LRU page cache + writeback
+│   │   └── krypton_fs.c               path operations, scan-gated writes
 │   ├── fuse/                          [P3] kryptonfs binary
-│   │   ├── main.c
-│   │   ├── krypton_fuse.c             FUSE callbacks
-│   │   ├── krypton_cache.c            page cache + writeback
-│   │   └── krypton_meta.c             encrypted inode/directory tables
+│   │   └── krypton_fuse.c             FUSE callbacks, sandbox wiring, main
 │   ├── net/                           [P4] shared by client and node
 │   │   ├── rpc_conn.c                 framed, MAC'd send/recv
 │   │   ├── rpc_handshake.c
