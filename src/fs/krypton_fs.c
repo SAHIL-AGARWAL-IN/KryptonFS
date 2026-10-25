@@ -617,6 +617,66 @@ int kfs_fs_sync(kfs_fs *fs)
     return to_errno(st);
 }
 
+typedef struct walk_state {
+    kfs_fs     *fs;
+    kfs_walk_fn fn;
+    void       *ctx;
+    size_t      left;
+    char        path[4096];
+} walk_state;
+
+static bool walk_node(walk_state *w, const kfs_inode *n, size_t path_len, unsigned depth)
+{
+    kfs_stat st;
+
+    if (w->left == 0)
+        return false;
+    w->left--;
+    fill_stat(w->fs, n, &st);
+    w->fn(w->ctx, w->path, depth, &st);
+    if (!S_ISDIR(n->mode))
+        return true;
+    for (uint32_t i = 0; i < n->nchildren; i++) {
+        const kfs_inode *c = kfs_meta_get(&w->fs->meta, n->children[i]);
+        size_t name_len, len = path_len;
+
+        if (c == NULL)
+            continue;
+        name_len = strlen(c->name);
+        if (len + 1 + name_len >= sizeof(w->path))
+            continue; /* too deep to show */
+        if (len > 1)
+            w->path[len++] = '/';
+        memcpy(w->path + len, c->name, name_len + 1);
+        if (!walk_node(w, c, len + name_len, depth + 1))
+            return false;
+        w->path[path_len] = '\0';
+    }
+    return true;
+}
+
+bool kfs_fs_walk(kfs_fs *fs, size_t max_entries, kfs_walk_fn fn, void *ctx)
+{
+    walk_state *w = malloc(sizeof(*w));
+    const kfs_inode *root;
+    bool complete = false;
+
+    if (w == NULL)
+        return false;
+    w->fs = fs;
+    w->fn = fn;
+    w->ctx = ctx;
+    w->left = max_entries;
+    strcpy(w->path, "/");
+    pthread_mutex_lock(&fs->lock);
+    root = kfs_meta_get(&fs->meta, KFS_ROOT_INO);
+    if (root != NULL)
+        complete = walk_node(w, root, 1, 0);
+    pthread_mutex_unlock(&fs->lock);
+    free(w);
+    return complete;
+}
+
 void kfs_fs_usage_get(kfs_fs *fs, kfs_fs_usage *out)
 {
     memset(out, 0, sizeof(*out));

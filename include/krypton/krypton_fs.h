@@ -103,4 +103,10 @@ typedef struct kfs_fs_usage {
 
 void kfs_fs_usage_get(kfs_fs *fs, kfs_fs_usage *out);
 
+/* Depth-first listing for the dashboard: fn gets each entry's full path
+ * (the root is "/"), depth, and stat. Stops after max_entries entries;
+ * returns true if the whole tree was listed. */
+typedef void (*kfs_walk_fn)(void *ctx, const char *path, unsigned depth, const kfs_stat *st);
+bool kfs_fs_walk(kfs_fs *fs, size_t max_entries, kfs_walk_fn fn, void *ctx);
+
 #endif /* KRYPTON_FS_H */

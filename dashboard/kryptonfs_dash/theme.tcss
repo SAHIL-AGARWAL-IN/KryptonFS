@@ -1,0 +1,103 @@
+/* KryptonFS dashboard: matte black, electric cyan, neon green, muted coral. */
+
+Screen {
+    background: #07090c;
+    color: #c9d4de;
+}
+
+Header {
+    background: #0b0f14;
+    color: #00e5ff;
+    text-style: bold;
+}
+
+Footer {
+    background: #0b0f14;
+    color: #7a8a99;
+}
+
+#grid {
+    layout: grid;
+    grid-size: 2 2;
+    grid-columns: 1fr 1fr;
+    grid-rows: 1fr 1fr;
+    grid-gutter: 1 2;
+    padding: 1 1 0 1;
+}
+
+.panel {
+    background: #0d1117;
+    border: round #0f5d6b;
+    border-title-color: #00e5ff;
+    border-title-style: bold;
+    border-subtitle-color: #7a8a99;
+    padding: 0 1;
+}
+
+.panel:focus-within {
+    border: round #00e5ff;
+}
+
+#io-stats {
+    height: auto;
+    margin-bottom: 1;
+}
+
+.spark-label {
+    color: #7a8a99;
+    text-style: bold;
+}
+
+Sparkline {
+    height: 1fr;
+    min-height: 3;
+    margin-bottom: 1;
+}
+
+#read-spark > .sparkline--max-color {
+    color: #39ff14;
+}
+
+#read-spark > .sparkline--min-color {
+    color: #0f5d3b;
+}
+
+#write-spark > .sparkline--max-color {
+    color: #00e5ff;
+}
+
+#write-spark > .sparkline--min-color {
+    color: #0f4d5b;
+}
+
+ClusterPanel {
+    background: #0d1117;
+    height: 100%;
+    max-height: 100%;
+}
+
+ClusterPanel > .datatable--header {
+    background: #0d1117;
+    color: #00e5ff;
+    text-style: bold;
+}
+
+MountTree {
+    background: #0d1117;
+}
+
+MountTree > .tree--guides {
+    color: #0f5d6b;
+}
+
+#security-status {
+    height: auto;
+    margin-bottom: 1;
+}
+
+#feed {
+    background: #0a0d12;
+    border-top: solid #0f5d6b;
+    scrollbar-color: #0f5d6b;
+    overflow-x: hidden;
+}

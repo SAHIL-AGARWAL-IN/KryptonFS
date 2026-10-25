@@ -43,6 +43,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(test_cluster PRIVATE kfs::net)
     kfs_apply_defaults(test_cluster)
     add_test(NAME cluster COMMAND test_cluster)
+
+    add_executable(test_telemetry test_telemetry.c)
+    target_link_libraries(test_telemetry PRIVATE kfs::telemetry)
+    kfs_apply_defaults(test_telemetry)
+    add_test(NAME telemetry COMMAND test_telemetry)
 endif()
 
 # The shipped example configuration must always load and validate.

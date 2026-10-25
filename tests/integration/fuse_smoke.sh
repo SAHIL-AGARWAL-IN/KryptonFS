@@ -110,6 +110,19 @@ nobody=$(ps -o user=,ppid= -e | awk -v p="$DPID" '$2 == p && $1 == "nobody"' | w
 check "4 sandbox workers run" test "$workers" = 4
 check "all workers run as nobody" test "$nobody" = 4
 
+# --- telemetry ------------------------------------------------------------
+python3 -I "$(dirname "$0")/telemetry_probe.py" "$WORK/telemetry.sock" 2.5 \
+    --expect-file /docs/greeting.txt --expect-alert "blocked write to /payload" --expect-io \
+    >"$WORK/probe.log" 2>&1 &
+probe=$!
+for _ in $(seq 20); do
+    cat "$MNT/docs/deep/random.bin" >/dev/null
+    sleep 0.1
+done
+check "telemetry stream is valid, live and complete" wait "$probe"
+[ -s "$WORK/probe.log" ] && sed 's/^/    /' "$WORK/probe.log"
+check "telemetry socket is owner-only" test "$(stat -c %a "$WORK/telemetry.sock")" = 600
+
 # --- at-rest secrecy ------------------------------------------------------
 check "file contents are not in the store" bash -c "! grep -rqa 'hello krypton' '$STORE'"
 check "file names are not in the store" bash -c "! grep -rqa 'greeting.txt' '$STORE'"

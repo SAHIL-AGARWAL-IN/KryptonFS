@@ -17,13 +17,13 @@ model and full project layout.
 | 2     | Cryptography, node keys and malware scanner        | done    |
 | 3     | FUSE driver, sandbox workers, IPC                  | done    |
 | 4     | Storage node server, replication, heartbeats       | done    |
-| 5     | Telemetry and dashboard                            | planned |
+| 5     | Telemetry and dashboard                            | done    |
 
 ## Building
 
 Requirements: CMake 3.20+, a C11 compiler (GCC or Clang), OpenSSL 3
-(`libssl-dev`) and, on Linux, libfuse 3.10+ (`libfuse3-dev`). Phase 5 adds
-Python 3.11+.
+(`libssl-dev`) and, on Linux, libfuse 3.10+ (`libfuse3-dev`). The
+dashboard needs Python 3.11+ (its tests: `cd dashboard && pytest`).
 
 ```sh
 make              # Debug build in build/
@@ -105,6 +105,29 @@ start as root so it can jail its workers, stays in the foreground (run it
 under systemd or similar), and unmounts cleanly with `fusermount3 -u` or
 Ctrl-C. Writes rejected by the malware scanner fail with "Permission
 denied" and are logged to syslog.
+
+## Dashboard
+
+`kryptonfs` streams live telemetry on the Unix socket from
+`[telemetry] socket` (default `/run/kryptonfs/telemetry.sock`). The
+Textual dashboard in `dashboard/` shows:
+
+- **System state:** read/write IOPS sparklines, throughput, average and
+  peak latency, cache occupancy and hit rate
+- **Cluster health:** each node's state, ping RTT and disk usage
+- **Virtual mount tree:** the decrypted directory structure
+- **Security audit:** jailed sandbox workers, where the volume key lives,
+  the crypto suite, and a feed of scanner, cluster, sandbox and key events
+
+```sh
+python3 -m venv .venv && .venv/bin/pip install ./dashboard
+sudo .venv/bin/kryptonfs-dash                 # the socket is root-only
+.venv/bin/kryptonfs-dash --demo               # synthetic feed, no mount needed
+```
+
+The socket is created mode 0600 because the mount tree carries decrypted
+file names. The wire format is documented in
+`include/krypton/krypton_telemetry.h`.
 
 ## Configuration
 

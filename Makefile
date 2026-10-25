@@ -5,13 +5,14 @@
 #   make release   optimized, fortified build + tests in build-release/
 #   make asan      AddressSanitizer + UBSan build + tests in build-asan/
 #   make integration  real mounts end to end, local and 3-node (Linux, root)
+#   make dashboard-test  dashboard unit and headless UI tests (in .venv)
 #   make clean     remove all build directories
 
 BUILD_DIR  ?= build
 BUILD_TYPE ?= Debug
 CMAKE_ARGS ?=
 
-.PHONY: all build test release asan integration clean
+.PHONY: all build test release asan integration dashboard-test clean
 
 all: build
 
@@ -33,6 +34,13 @@ asan:
 integration: build
 	tests/integration/fuse_smoke.sh $(BUILD_DIR)
 	tests/integration/cluster_smoke.sh $(BUILD_DIR)
+
+.venv/bin/pytest: dashboard/pyproject.toml
+	python3 -m venv .venv
+	.venv/bin/pip install -q -e "dashboard[test]"
+
+dashboard-test: .venv/bin/pytest
+	cd dashboard && ../.venv/bin/pytest -q
 
 clean:
 	rm -rf build build-release build-asan

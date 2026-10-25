@@ -137,6 +137,8 @@ mkdir "$MNT/dir"
 cp "$WORK/random.bin" "$MNT/dir/random.bin"
 check "small file round-trips" test "$(cat "$MNT/hello.txt")" = "hello cluster"
 check "2 MB file round-trips" cmp -s "$WORK/random.bin" "$MNT/dir/random.bin"
+check "telemetry shows 3 healthy nodes with RTT" python3 -I "$(dirname "$0")/telemetry_probe.py" \
+    "$WORK/telemetry.sock" 1.5 --expect-nodes 3 --expect-file /dir/random.bin
 check "clean unmount" unmount_fs
 
 objects=$(replica_counts | wc -l)

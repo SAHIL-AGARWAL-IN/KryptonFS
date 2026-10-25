@@ -52,6 +52,18 @@ write, or a tampered copy, is skipped for the next replica. If no replica
 has an acceptable copy, the read fails with `EIO`, never garbage
 plaintext.
 
+### Telemetry
+
+`kryptonfs` publishes one JSON snapshot per `[telemetry] interval_ms` on a
+Unix socket: interval I/O counters and latency, cache and usage figures,
+node health, sandbox worker state, key status and new audit events. The
+mount tree goes out every fourth interval. Counters are lock-free atomics
+updated from the FUSE callbacks; events go through a 256-entry ring. A
+dashboard that falls behind is disconnected rather than allowed to stall
+the daemon. The socket is mode 0600, since the tree carries decrypted
+names, and file names that are not valid UTF-8 are sent as U+FFFD so the
+stream always parses.
+
 ## Wire formats
 
 Defined byte-for-byte in `include/krypton/krypton_protocol.h`:
@@ -196,7 +208,7 @@ KryptonFS/
 │   ├── krypton_pool.h                 [P4] pinned per-peer connections
 │   ├── krypton_cluster.h              [P4] placement, health, heartbeats
 │   ├── krypton_net_backend.h          [P4] the cluster as a block backend
-│   └── krypton_telemetry.h            [P5] metrics and audit events
+│   └── krypton_telemetry.h            [P5] telemetry wire format and API
 ├── src/
 │   ├── common/                        [P1] libkfs_common: portable, no dependencies
 │   │   ├── krypton_common.c
@@ -228,23 +240,25 @@ KryptonFS/
 │   │   └── backend_net.c              client backend: replica-ordered I/O
 │   ├── node/                          [P4] kfs-noded binary
 │   │   └── kfs_noded.c                thread-pool TCP server, storage, replication
-│   └── telemetry/                     [P5]
-│       └── telemetry_server.c         Unix-socket JSON-lines publisher
+│   └── telemetry/                     [P5] libkfs_telemetry (Linux)
+│       └── telemetry_server.c         0600 Unix socket, JSON lines, event ring
 ├── tools/
 │   ├── kfs-keygen.c                   [P2] RSA-2048 key pair + cluster key
 │   └── kfs-mkvol.c                    [P3] volume header + empty root directory
 ├── dashboard/                         [P5] Python 3.11+, Textual
 │   ├── pyproject.toml
-│   └── kryptonfs_dash/
-│       ├── __main__.py
-│       ├── app.py
-│       ├── telemetry_client.py
-│       ├── theme.tcss                 matte black / cyan / neon green / coral
-│       └── widgets/
-│           ├── iops_panel.py          IOPS, latency, throughput
-│           ├── mount_tree.py          virtual mount tree
-│           ├── cluster_health.py      node state, RTT, disk usage
-│           └── audit_feed.py          sandboxes, key status, scan results
+│   ├── kryptonfs_dash/
+│   │   ├── __main__.py                kryptonfs-dash [--socket PATH] [--demo]
+│   │   ├── app.py                     layout, feed worker, key bindings
+│   │   ├── telemetry.py               socket client, rate/history aggregation
+│   │   ├── demo.py                    synthetic feed in the daemon's format
+│   │   ├── theme.tcss                 matte black / cyan / neon green / coral
+│   │   └── widgets/
+│   │       ├── iops_panel.py          IOPS, latency, throughput, cache
+│   │       ├── mount_tree.py          virtual mount tree
+│   │       ├── cluster_health.py      node state, RTT, disk usage
+│   │       └── audit_feed.py          sandboxes, key status, event feed
+│   └── tests/                         aggregation, socket client, headless UI
 └── tests/
     ├── CMakeLists.txt                 [P1]
     ├── kfs_test.h                     [P1] assertion harness
@@ -258,7 +272,9 @@ KryptonFS/
     ├── test_fs.c                      [P3] crash, rollback, tamper, at-rest secrecy
     ├── test_rpc.c                     [P4] handshake, impostors, tamper, replay
     ├── test_cluster.c                 [P4] placement, health, live heartbeats
+    ├── test_telemetry.c               [P5] socket as a dashboard sees it, escaping
     └── integration/
         ├── fuse_smoke.sh              [P3] real mount, end to end
-        └── cluster_smoke.sh           [P4] 3 nodes + client: replication, failure, tamper
+        ├── cluster_smoke.sh           [P4] 3 nodes + client: replication, failure, tamper
+        └── telemetry_probe.py         [P5] validates the live telemetry stream
 ```

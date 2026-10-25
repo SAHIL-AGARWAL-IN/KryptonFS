@@ -44,22 +44,30 @@
 #include "krypton/krypton_passphrase.h"
 #include "krypton/krypton_sandbox.h"
 #include "krypton/krypton_scanner.h"
+#include "krypton/krypton_telemetry.h"
 #include "krypton/krypton_volume.h"
 
 typedef struct daemon_ctx {
-    kfs_config   cfg;
-    kfs_backend *backend;
-    kfs_scanner *scanner;
-    kfs_sandbox *sandbox;
-    kfs_blockio  io;
-    bool         io_ready;
-    kfs_fs      *fs;
-    uint32_t     block_size;
+    kfs_config     cfg;
+    kfs_backend   *backend;
+    kfs_scanner   *scanner;
+    kfs_sandbox   *sandbox;
+    kfs_blockio    io;
+    bool           io_ready;
+    kfs_fs        *fs;
+    kfs_telemetry *tel;
+    uint32_t       block_size;
+    uint32_t       kdf_iterations;
 } daemon_ctx;
+
+static daemon_ctx *CTX(void)
+{
+    return fuse_get_context()->private_data;
+}
 
 static kfs_fs *FS(void)
 {
-    return ((daemon_ctx *)fuse_get_context()->private_data)->fs;
+    return CTX()->fs;
 }
 
 /* ---------------------------------------------------------------------
@@ -128,10 +136,14 @@ static void audit(void *ctx, const char *path, const kfs_scan_hit *hit, bool blo
 {
     daemon_ctx *d = ctx;
 
+    const char *sig = kfs_scanner_sig_name(d->scanner, hit->sig_id);
+
     syslog(blocked ? LOG_WARNING : LOG_NOTICE,
            "%s write to %s: signature %u (%s) at offset %u",
-           blocked ? "blocked" : "allowed", path, hit->sig_id,
-           kfs_scanner_sig_name(d->scanner, hit->sig_id), hit->offset);
+           blocked ? "blocked" : "allowed", path, hit->sig_id, sig, hit->offset);
+    kfs_telemetry_event(d->tel, blocked ? KFS_EV_ALERT : KFS_EV_WARN, "scanner",
+                        "%s write to %s: %s at offset %u",
+                        blocked ? "blocked" : "allowed", path, sig, hit->offset);
 }
 
 /* ---------------------------------------------------------------------
@@ -163,9 +175,12 @@ static uint32_t block_size(void)
 
 static void *op_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
 {
+    daemon_ctx *d = fuse_get_context()->private_data;
+
     (void)conn;
     cfg->use_ino = 1;
-    return fuse_get_context()->private_data;
+    kfs_telemetry_event(d->tel, KFS_EV_INFO, "volume", "mounted");
+    return d;
 }
 
 static int op_getattr(const char *path, struct stat *st, struct fuse_file_info *fi)
@@ -241,19 +256,31 @@ static int op_open(const char *path, struct fuse_file_info *fi)
 static int op_read(const char *path, char *buf, size_t size, off_t off,
                    struct fuse_file_info *fi)
 {
+    int64_t start = kfs_mono_ns();
+    int rc;
+
     (void)fi;
     if (off < 0)
         return -EINVAL;
-    return kfs_fs_read(FS(), path, (uint8_t *)buf, size, (uint64_t)off);
+    rc = kfs_fs_read(FS(), path, (uint8_t *)buf, size, (uint64_t)off);
+    kfs_telemetry_io(CTX()->tel, false, rc > 0 ? (size_t)rc : 0, kfs_mono_ns() - start, rc >= 0);
+    return rc;
 }
 
 static int op_write(const char *path, const char *buf, size_t size, off_t off,
                     struct fuse_file_info *fi)
 {
+    int64_t start = kfs_mono_ns();
+    int rc;
+
     (void)fi;
     if (off < 0)
         return -EINVAL;
-    return kfs_fs_write(FS(), path, (const uint8_t *)buf, size, (uint64_t)off);
+    rc = kfs_fs_write(FS(), path, (const uint8_t *)buf, size, (uint64_t)off);
+    /* A scanner rejection is a policy outcome, not an I/O error. */
+    kfs_telemetry_io(CTX()->tel, true, rc > 0 ? (size_t)rc : 0, kfs_mono_ns() - start,
+                     rc >= 0 || rc == -EACCES);
+    return rc;
 }
 
 static int op_truncate(const char *path, off_t size, struct fuse_file_info *fi)
@@ -362,17 +389,18 @@ typedef struct cli_opts {
     char *config;
     char *store;
     int   help;
-    bool  has_mountpoint;
+    char *mountpoint; /* positional argument, if given */
 } cli_opts;
 
-/* Notes whether a positional (mountpoint) argument was given; every
- * argument not matched by CLI_SPEC passes through to FUSE. */
+/* Records the positional (mountpoint) argument; every argument not
+ * matched by CLI_SPEC passes through to FUSE. */
 static int keep_arg(void *data, const char *arg, int key, struct fuse_args *outargs)
 {
-    (void)arg;
+    cli_opts *cli = data;
+
     (void)outargs;
-    if (key == FUSE_OPT_KEY_NONOPT)
-        ((cli_opts *)data)->has_mountpoint = true;
+    if (key == FUSE_OPT_KEY_NONOPT && cli->mountpoint == NULL)
+        cli->mountpoint = strdup(arg);
     return 1;
 }
 
@@ -527,8 +555,10 @@ static int unlock_volume(daemon_ctx *d)
         fprintf(stderr, "kryptonfs: no replica of the volume header is reachable\n");
         return -1;
     }
-    if (st == KFS_OK)
+    if (st == KFS_OK) {
         d->block_size = vh.block_size;
+        d->kdf_iterations = vh.kdf_iterations;
+    }
     if (st == KFS_OK)
         st = kfs_block_keys_derive(volume_key, &keys);
     kfs_wipe(volume_key, sizeof(volume_key));
@@ -584,8 +614,57 @@ static int open_fs(daemon_ctx *d)
     return 0;
 }
 
+/* Optional: a failure is logged and the mount proceeds without it. */
+static void start_telemetry(daemon_ctx *d, const char *mountpoint, bool local)
+{
+    kfs_telemetry_sources src;
+    kfs_status st;
+
+    if (!d->cfg.telemetry.enabled)
+        return;
+    memset(&src, 0, sizeof(src));
+    src.fs = d->fs;
+    src.sandbox = d->sandbox;
+    src.health = local ? NULL : kfs_backend_cluster_health(d->backend);
+    src.volume_name = d->cfg.volume.name;
+    src.mountpoint = mountpoint;
+    src.backend = local ? "local" : "cluster";
+    src.block_size = d->block_size;
+    src.kdf_iterations = d->kdf_iterations;
+    src.crypto_workers = d->cfg.sandbox.crypto_workers;
+    src.identity_id = local ? 0 : d->cfg.node.node_id;
+    st = kfs_telemetry_start(d->cfg.telemetry.socket_path, d->cfg.telemetry.interval_ms,
+                             &src, &d->tel);
+    if (st != KFS_OK) {
+        syslog(LOG_WARNING, "telemetry disabled: cannot serve %s", d->cfg.telemetry.socket_path);
+        return;
+    }
+
+    kfs_telemetry_event(d->tel, KFS_EV_INFO, "keys",
+                        "volume unlocked (PBKDF2-HMAC-SHA256, %u iterations)", d->kdf_iterations);
+    kfs_telemetry_event(d->tel, KFS_EV_INFO, "sandbox",
+                        "%u scan + %u crypto workers jailed in %s as uid %u",
+                        d->cfg.sandbox.scan_workers, d->cfg.sandbox.crypto_workers,
+                        d->cfg.sandbox.chroot_dir, d->cfg.sandbox.uid);
+    kfs_telemetry_event(d->tel, KFS_EV_INFO, "keys",
+                        "volume key handed to the crypto workers and wiped from the daemon");
+    if (local)
+        kfs_telemetry_event(d->tel, KFS_EV_INFO, "cluster", "using a local block store");
+    else
+        kfs_telemetry_event(d->tel, KFS_EV_INFO, "cluster",
+                            "joined as node %u: %u peers, replication %u",
+                            d->cfg.node.node_id, d->cfg.cluster.peer_count,
+                            d->cfg.cluster.replication);
+    if (d->scanner == NULL)
+        kfs_telemetry_event(d->tel, KFS_EV_WARN, "scanner", "malware scanner disabled");
+    else
+        kfs_telemetry_event(d->tel, KFS_EV_INFO, "scanner", "malware scanner active (%s mode)",
+                            d->cfg.scanner.action == KFS_SCAN_REJECT ? "reject" : "log");
+}
+
 static void shutdown_all(daemon_ctx *d)
 {
+    kfs_telemetry_stop(d->tel);
     if (d->fs != NULL && kfs_fs_close(d->fs) != 0)
         fprintf(stderr, "kryptonfs: final sync failed; last committed state is intact\n");
     if (d->io_ready)
@@ -599,7 +678,7 @@ int main(int argc, char **argv)
 {
     struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
     static daemon_ctx d;
-    cli_opts cli = { NULL, NULL, 0, false };
+    cli_opts cli = { NULL, NULL, 0, NULL };
     char err[512];
     int rc = 1;
 
@@ -630,8 +709,10 @@ int main(int argc, char **argv)
          * The kernel enforces permissions from the stored modes. */
         fuse_opt_add_arg(&args, "-f");
         fuse_opt_add_arg(&args, "-odefault_permissions,allow_other,fsname=kryptonfs,subtype=kryptonfs");
-        if (!cli.has_mountpoint)
+        if (cli.mountpoint == NULL)
             fuse_opt_add_arg(&args, d.cfg.volume.mountpoint);
+        start_telemetry(&d, cli.mountpoint != NULL ? cli.mountpoint : d.cfg.volume.mountpoint,
+                        cli.store != NULL);
         rc = fuse_main(args.argc, args.argv, &OPS, &d);
     }
 
@@ -639,6 +720,7 @@ int main(int argc, char **argv)
     fuse_opt_free_args(&args);
     free(cli.config);
     free(cli.store);
+    free(cli.mountpoint);
     closelog();
     return rc;
 }
