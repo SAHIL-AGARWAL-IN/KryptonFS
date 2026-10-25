@@ -32,6 +32,16 @@ def disk_bar(used: int, total: int, width: int = 12) -> Text:
 COLUMNS = ("NODE", "STATE", "RTT", "DISK", "SEEN")
 
 
+def rtt_label(node: dict) -> str:
+    """The last measured RTT, but only while the node is answering: the
+    daemon keeps reporting a dead node's final RTT, which would read as
+    if it were still responsive."""
+    rtt = node.get("rtt_us", 0)
+    if node.get("state") in ("down", "unknown") or rtt <= 0:
+        return "—"
+    return human_latency(rtt)
+
+
 class ClusterPanel(DataTable):
     def on_mount(self) -> None:
         self.cursor_type = "none"
@@ -53,12 +63,11 @@ class ClusterPanel(DataTable):
             return
         for node in nodes:
             st = node.get("state", "unknown")
-            rtt = node.get("rtt_us", 0)
             seen = node.get("last_seen_ms", -1)
             self.add_row(
                 Text(f"#{node.get('id')}", style="bold #00e5ff"),
                 Text(st.upper(), style=STATE_STYLE.get(st, "#c9d4de")),
-                Text(human_latency(rtt) if rtt > 0 else "—", style="#c9d4de"),
+                Text(rtt_label(node), style="#c9d4de"),
                 disk_bar(node.get("disk_used", 0), node.get("disk_total", 0)),
                 Text("never" if seen < 0 else f"{seen / 1000:.1f}s ago", style="#7a8a99"),
             )

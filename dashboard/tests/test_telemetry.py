@@ -79,6 +79,14 @@ def test_panel_text_reflects_state():
     assert "FAILED CLOSED" in status_text(s).plain
 
 
+def test_down_node_shows_no_rtt():
+    from kryptonfs_dash.widgets.cluster_health import rtt_label
+
+    assert rtt_label({"state": "up", "rtt_us": 450}) == "450 µs"
+    assert rtt_label({"state": "down", "rtt_us": 145}) == "—"  # stale, not live
+    assert rtt_label({"state": "unknown", "rtt_us": 0}) == "—"
+
+
 def test_stream_reads_json_lines_from_a_unix_socket():
     async def scenario():
         with tempfile.TemporaryDirectory() as tmp:
