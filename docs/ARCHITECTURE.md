@@ -156,9 +156,8 @@ KryptonFS/
 │   │   └── krypton_keystore.c         RSA-PSS sign/verify, key files, pinning
 │   ├── scanner/                       [P2] libkfs_scanner
 │   │   └── malware_scanner.c          ELF header check, Aho-Corasick signature matcher
-│   ├── sandbox/                       [P3]
-│   │   ├── sandbox_worker.c           fork, chroot, setgid/setuid, worker loop
-│   │   └── ipc_channel.c              msgget/msgsnd/msgrcv, arena mmap
+│   ├── sandbox/                       [P3] libkfs_sandbox (Linux)
+│   │   └── sandbox_worker.c           worker pools, jail, msg queues, arena, supervisor
 │   ├── fuse/                          [P3] kryptonfs binary
 │   │   ├── main.c
 │   │   ├── krypton_fuse.c             FUSE callbacks

@@ -23,6 +23,13 @@ target_link_libraries(test_scanner PRIVATE kfs::scanner)
 kfs_apply_defaults(test_scanner)
 add_test(NAME scanner COMMAND test_scanner)
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(test_sandbox test_sandbox.c)
+    target_link_libraries(test_sandbox PRIVATE kfs::sandbox)
+    kfs_apply_defaults(test_sandbox)
+    add_test(NAME sandbox COMMAND test_sandbox)
+endif()
+
 # The shipped example configuration must always load and validate.
 target_compile_definitions(test_config PRIVATE
     KFS_EXAMPLE_CONFIG="${PROJECT_SOURCE_DIR}/config/kryptonfs.conf.example")

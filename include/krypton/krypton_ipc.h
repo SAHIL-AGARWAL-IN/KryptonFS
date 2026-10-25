@@ -23,7 +23,8 @@
  *     slot + 1 so each waiting FUSE thread msgrcv()s only its own reply.
  *
  * A slot's owner fills it, msgsnd()s, and does not touch it again until
- * the matching reply arrives. SEAL and OPEN run in place.
+ * the matching reply arrives. SEAL and OPEN run in place; SEAL reads the
+ * generation from the slot's envelope header and writes iv and tag back.
  *
  * Arena layout (offsets from the mapping base):
  *
@@ -66,10 +67,14 @@ typedef struct kfs_ipc_msg {
     uint64_t req_id;      /* echoed in the reply; the FUSE side drops mismatches */
     uint64_t block_id;    /* bound into the envelope tag */
     uint32_t len;         /* valid bytes in the slot's data */
+    uint32_t flags;       /* KFS_IPC_F_* */
     uint32_t status;      /* reply: kfs_status */
     uint32_t scan_sig;    /* SCAN reply with KFS_E_MALWARE: matched signature id */
     uint32_t scan_offset; /* ... and the match's byte offset within the block */
 } kfs_ipc_msg;
+
+/* SCAN: the slot holds the block at file offset 0 (enables the ELF check). */
+#define KFS_IPC_F_FILE_START 0x1u
 
 /* The size argument to msgsnd/msgrcv: the message body after mtype. */
 #define KFS_IPC_MSG_BODY_SIZE (sizeof(kfs_ipc_msg) - sizeof(long))

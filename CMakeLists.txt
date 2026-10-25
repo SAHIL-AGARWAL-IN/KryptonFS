@@ -37,7 +37,12 @@ add_subdirectory(src/common)
 add_subdirectory(src/crypto)
 add_subdirectory(src/scanner)
 add_subdirectory(tools)
-# Later phases add: src/sandbox, src/fuse (3);
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(Threads REQUIRED)
+    add_subdirectory(src/sandbox)
+endif()
+# Later phases add: src/fuse (3);
 # src/net, src/node (4); src/telemetry (5).
 
 if(KFS_BUILD_TESTS)
