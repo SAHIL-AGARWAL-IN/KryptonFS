@@ -76,6 +76,10 @@ kfs_status kfs_volume_create(const char *pass, size_t pass_len,
                              uint8_t out[KFS_VOLUME_HDR_SIZE],
                              uint8_t volume_key[KFS_KEY_SIZE]);
 
+/* The block size from an unverified header, or 0 if malformed. Only for
+ * sizing buffers before unlock; kfs_volume_unlock() authenticates it. */
+uint32_t kfs_volume_block_size(const uint8_t in[KFS_VOLUME_HDR_SIZE]);
+
 /* KFS_E_PROTO for a malformed header, KFS_E_AUTH for a wrong passphrase
  * or edited parameters. */
 kfs_status kfs_volume_unlock(const uint8_t in[KFS_VOLUME_HDR_SIZE],

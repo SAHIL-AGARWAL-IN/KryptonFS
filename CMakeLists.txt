@@ -36,15 +36,17 @@ find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
 add_subdirectory(src/common)
 add_subdirectory(src/crypto)
 add_subdirectory(src/scanner)
-add_subdirectory(tools)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(Threads REQUIRED)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(FUSE3 REQUIRED IMPORTED_TARGET fuse3>=3.10)
     add_subdirectory(src/sandbox)
     add_subdirectory(src/fs)
+    add_subdirectory(src/fuse)
 endif()
-# Later phases add: src/fuse (3);
-# src/net, src/node (4); src/telemetry (5).
+add_subdirectory(tools)
+# Later phases add: src/net, src/node (4); src/telemetry (5).
 
 if(KFS_BUILD_TESTS)
     enable_testing()

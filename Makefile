@@ -4,13 +4,14 @@
 #   make test      build + run unit tests
 #   make release   optimized, fortified build + tests in build-release/
 #   make asan      AddressSanitizer + UBSan build + tests in build-asan/
+#   make integration  mount a real volume end to end (Linux, root)
 #   make clean     remove all build directories
 
 BUILD_DIR  ?= build
 BUILD_TYPE ?= Debug
 CMAKE_ARGS ?=
 
-.PHONY: all build test release asan clean
+.PHONY: all build test release asan integration clean
 
 all: build
 
@@ -28,6 +29,9 @@ release:
 
 asan:
 	$(MAKE) test BUILD_DIR=build-asan CMAKE_ARGS=-DKFS_SANITIZE=ON
+
+integration: build
+	tests/integration/fuse_smoke.sh $(BUILD_DIR)
 
 clean:
 	rm -rf build build-release build-asan

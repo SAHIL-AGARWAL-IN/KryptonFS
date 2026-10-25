@@ -205,7 +205,7 @@ KryptonFS/
 │       └── telemetry_server.c         Unix-socket JSON-lines publisher
 ├── tools/
 │   ├── kfs-keygen.c                   [P2] RSA-2048 key pair + cluster key
-│   └── kfs-mkvol.c                    [P3] volume header creation
+│   └── kfs-mkvol.c                    [P3] volume header + empty root directory
 ├── dashboard/                         [P5] Python 3.11+, Textual
 │   ├── pyproject.toml
 │   └── kryptonfs_dash/
@@ -227,6 +227,9 @@ KryptonFS/
     ├── test_crypto.c                  [P2] NIST / RFC test vectors, tamper cases
     ├── test_keystore.c                [P2]
     ├── test_scanner.c                 [P2]
-    ├── test_sandbox.c                 [P3]
-    └── integration/                   [P4] multi-node cluster scripts
+    ├── test_sandbox.c                 [P3] jail, fail-closed, concurrency
+    ├── test_fs.c                      [P3] crash, rollback, tamper, at-rest secrecy
+    └── integration/
+        ├── fuse_smoke.sh              [P3] real mount, end to end
+        └── cluster_*.sh               [P4] multi-node cluster scripts
 ```

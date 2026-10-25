@@ -85,6 +85,13 @@ kfs_status kfs_volume_create(const char *pass, size_t pass_len,
     return st;
 }
 
+uint32_t kfs_volume_block_size(const uint8_t in[KFS_VOLUME_HDR_SIZE])
+{
+    uint32_t bs = kfs_load_be32(in + OFF_BLOCK_SIZE);
+
+    return kfs_load_be32(in + OFF_MAGIC) == KFS_VOLUME_MAGIC && block_size_ok(bs) ? bs : 0;
+}
+
 kfs_status kfs_volume_unlock(const uint8_t in[KFS_VOLUME_HDR_SIZE],
                              const char *pass, size_t pass_len,
                              kfs_volume_header *hdr,

@@ -15,20 +15,22 @@ model and full project layout.
 |-------|----------------------------------------------------|---------|
 | 1     | Scaffolding, wire formats, IPC layout, config      | done    |
 | 2     | Cryptography, node keys and malware scanner        | done    |
-| 3     | FUSE driver, sandbox workers, IPC                  | planned |
+| 3     | FUSE driver, sandbox workers, IPC                  | done    |
 | 4     | Storage node server, replication, heartbeats       | planned |
 | 5     | Telemetry and dashboard                            | planned |
 
 ## Building
 
-Requirements: CMake 3.20+, a C11 compiler (GCC or Clang). Later phases add
-`libfuse3-dev`, `libssl-dev` and Python 3.11+.
+Requirements: CMake 3.20+, a C11 compiler (GCC or Clang), OpenSSL 3
+(`libssl-dev`) and, on Linux, libfuse 3.10+ (`libfuse3-dev`). Phase 5 adds
+Python 3.11+.
 
 ```sh
-make          # Debug build in build/
-make test     # build and run the unit tests
-make release  # optimized, fortified build in build-release/, then tests
-make asan     # AddressSanitizer + UBSan build in build-asan/, then tests
+make              # Debug build in build/
+make test         # build and run the unit tests
+make release      # optimized, fortified build in build-release/, then tests
+make asan         # AddressSanitizer + UBSan build in build-asan/, then tests
+sudo make integration  # mount a real volume and exercise it end to end
 ```
 
 Or with CMake directly:
@@ -41,20 +43,42 @@ ctest --test-dir build --output-on-failure
 
 ### Non-Linux hosts
 
-FUSE, System V IPC and `chroot` are Linux-only. The Phase 1 common library
-and its tests also build natively with MinGW on Windows, but from Phase 3 on
-you need Linux. The dev container has the full toolchain:
+FUSE, System V IPC and `chroot` are Linux-only. The common, crypto and
+scanner libraries and their tests also build natively with MinGW on
+Windows; everything else needs Linux. The dev container has the full
+toolchain:
 
 ```sh
 docker build -f docker/dev.Dockerfile -t kryptonfs-dev .
-docker run --rm -it --device /dev/fuse --cap-add SYS_ADMIN \
-    -v "$PWD":/src kryptonfs-dev
+docker run --rm -it --device /dev/fuse --cap-add SYS_ADMIN --cap-add IPC_LOCK \
+    -v "$PWD":/src -w /src kryptonfs-dev
 # inside the container:
-make test
+make test integration
 ```
 
-`--device /dev/fuse` and `SYS_ADMIN` are needed to mount FUSE filesystems.
-Docker's default capabilities already cover `chroot` and `setuid`.
+`--device /dev/fuse` and `SYS_ADMIN` are needed to mount FUSE filesystems,
+and `IPC_LOCK` lets the daemon lock its plaintext cache into RAM. Docker's
+default capabilities already cover `chroot` and `setuid`. Add
+`--cap-add SYS_PTRACE` to let the sandbox test read the workers' chroot
+path (they are non-dumpable, which hides it otherwise).
+
+## Using a volume
+
+Until Phase 4 adds storage nodes, blocks live in a local directory:
+
+```sh
+mkdir -p /srv/krypton-store /mnt/krypton /var/empty/kryptonfs
+kfs-mkvol --local-store /srv/krypton-store --owner "$(id -u):$(id -g)"
+sudo kryptonfs -c /etc/kryptonfs/kryptonfs.conf \
+    --local-store=/srv/krypton-store /mnt/krypton
+```
+
+Both prompt for the passphrase on the terminal; they also accept it on
+stdin or in `$KRYPTONFS_PASSPHRASE` for automation. `kryptonfs` must start
+as root so it can jail its workers, stays in the foreground (run it under
+systemd or similar), and unmounts cleanly with `fusermount3 -u` or Ctrl-C.
+Writes rejected by the malware scanner fail with "Permission denied" and
+are logged to syslog.
 
 ## Keys
 

@@ -4,6 +4,7 @@ add_library(kfs_fs STATIC
     krypton_cache.c
     krypton_fs.c
     krypton_meta.c
+    krypton_passphrase.c
     krypton_volume.c)
 add_library(kfs::fs ALIAS kfs_fs)
 
