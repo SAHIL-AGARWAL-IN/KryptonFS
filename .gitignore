@@ -1,0 +1,22 @@
+# Build output
+build/
+build-*/
+compile_commands.json
+
+# Python (dashboard)
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# Key material must never be committed
+*.pem
+*.key
+keys/
+
+# Editors and OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

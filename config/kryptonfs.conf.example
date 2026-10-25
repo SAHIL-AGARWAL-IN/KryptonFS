@@ -1,0 +1,78 @@
+# KryptonFS reference configuration.
+#
+# One file serves both daemons. kryptonfs (FUSE client) reads [volume],
+# [sandbox], [cache] and [scanner]; kfs-noded (storage node) reads [node].
+# Both read [crypto], [cluster] and [telemetry].
+#
+# Values are the built-in defaults except where marked "example".
+# Sizes take K/M/G suffixes. Comments must be on their own line.
+
+[volume]
+name = krypton
+# example; required by the client
+mountpoint = /mnt/krypton
+
+[crypto]
+# This host's RSA-2048 identity (PEM, mode 0600).
+node_key = /etc/kryptonfs/keys/node.key.pem
+# Pinned peer public keys, one <node_id>.pub.pem each. Unknown keys are refused.
+trusted_keys = /etc/kryptonfs/keys/trusted
+# 32-byte shared secret that authenticates UDP heartbeats.
+cluster_key = /etc/kryptonfs/keys/cluster.key
+
+[sandbox]
+# Scan workers parse untrusted file content and never hold keys.
+scan_workers = 2
+# Crypto workers hold volume keys and never parse.
+crypto_workers = 2
+# Shared-memory slots: the most blocks in flight to the sandbox at once.
+ipc_slots = 64
+# Empty, root-owned directory the workers chroot into. Must not be /.
+chroot_dir = /var/empty/kryptonfs
+# Unprivileged identity the workers drop to (65534 = nobody). 0 is refused.
+uid = 65534
+gid = 65534
+
+[cache]
+# Plaintext block cache (mmap).
+size = 256M
+writeback_ms = 500
+# mlock() the cache so plaintext never reaches swap.
+lock_memory = true
+
+[cluster]
+# example: peer = <node_id> <host> <rpc_port> <hb_port>, one line per node
+peer = 1 10.0.0.11 7400 7401
+peer = 2 10.0.0.12 7400 7401
+peer = 3 10.0.0.13 7400 7401
+# Copies kept of every block; at most the number of peers.
+replication = 2
+heartbeat_interval_ms = 1000
+# A node silent this long is marked DOWN. At least twice the interval.
+heartbeat_timeout_ms = 3000
+rpc_timeout_ms = 5000
+
+[node]
+# example; required by kfs-noded and must match one of the peer ids above
+id = 1
+bind = 0.0.0.0
+rpc_port = 7400
+hb_port = 7401
+data_dir = /var/lib/kryptonfs
+io_threads = 8
+max_connections = 256
+
+[scanner]
+enabled = true
+# Refuse files that begin with an ELF header.
+block_elf = true
+# Extra byte-signature database; empty means the built-in set only.
+signatures =
+# reject: fail the write with EACCES. log: allow it and raise an audit event.
+action = reject
+
+[telemetry]
+enabled = true
+# Unix socket the dashboard connects to.
+socket = /run/kryptonfs/telemetry.sock
+interval_ms = 500
