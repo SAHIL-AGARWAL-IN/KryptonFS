@@ -58,6 +58,7 @@ static bool mount_open(mount *m, uint64_t cache_bytes, kfs_scan_action action)
     o.scan_ctx = scanner;
     o.scan_action = action;
     o.audit = audit;
+    o.format_if_empty = true;
     o.root_uid = 1000;
     o.root_gid = 1000;
     if (kfs_backend_open_local(store, &m->backend) != KFS_OK ||

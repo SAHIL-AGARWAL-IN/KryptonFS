@@ -93,13 +93,16 @@ static kfs_status local_put(kfs_backend *b, uint64_t id, const uint8_t *buf, siz
     return fsync_dir(dir) ? KFS_OK : KFS_E_IO;
 }
 
-static kfs_status local_get(kfs_backend *b, uint64_t id, uint8_t *buf, size_t cap, size_t *len)
+static kfs_status local_get(kfs_backend *b, uint64_t id, uint32_t replica,
+                            uint8_t *buf, size_t cap, size_t *len)
 {
     char path[KFS_PATH_MAX + 32];
     struct stat st;
     size_t done = 0;
     int fd;
 
+    if (replica != 0)
+        return KFS_E_UNAVAILABLE;
     object_path(local_of(b), id, path, sizeof(path));
     fd = open(path, O_RDONLY | O_CLOEXEC);
     if (fd < 0)
@@ -160,6 +163,7 @@ kfs_status kfs_backend_open_local(const char *dir, kfs_backend **out)
     if (lb == NULL)
         return KFS_E_NOMEM;
     lb->base.ops = &LOCAL_OPS;
+    lb->base.replicas = 1;
     snprintf(lb->dir, sizeof(lb->dir), "%s", dir);
     atomic_init(&lb->tmp_seq, 0);
     *out = &lb->base;

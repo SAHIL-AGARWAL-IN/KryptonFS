@@ -643,7 +643,7 @@ static kfs_status read_root(kfs_blockio *io, uint64_t parity, uint64_t *gen,
     kfs_status st;
 
     st = kfs_blockio_read(io, kfs_bid(KFS_META_INO, KFS_META_ROOT_INDEX, parity),
-                          root, ROOT_LEN, &env_gen);
+                          root, ROOT_LEN, KFS_GEN_NEWEST, &env_gen);
     if (st != KFS_OK)
         return st;
     *gen = kfs_load_be64(root);
@@ -664,8 +664,9 @@ kfs_status kfs_meta_load(kfs_meta *m, kfs_blockio *io, uint32_t block_size)
 
     for (uint64_t p = 0; p < 2; p++) {
         st = read_root(io, p, &gen[p], &blob_len[p], &nchunks[p]);
-        /* Any damaged root fails the mount: silently falling back to the
-         * older copy would let storage roll the volume back. */
+        /* A root with no authentic copy on any replica, or an unreachable
+         * replica that might hold a newer one, fails the mount: falling
+         * back to the other root would let storage roll the volume back. */
         if (st != KFS_OK && st != KFS_E_NOT_FOUND)
             return st;
         if (st == KFS_E_NOT_FOUND)
@@ -687,10 +688,11 @@ kfs_status kfs_meta_load(kfs_meta *m, kfs_blockio *io, uint32_t block_size)
     for (uint32_t i = 0; i < nchunks[use] && st == KFS_OK; i++) {
         uint64_t chunk_gen = 0;
 
+        /* Chunks must carry the root's generation: a chunk left over
+         * from another commit is rejected. */
         st = kfs_blockio_read(io, kfs_bid(KFS_META_INO, KFS_META_CHUNK_INDEX + i, gen[use]),
-                              blob + (size_t)i * block_size, block_size, &chunk_gen);
-        if (st == KFS_OK && chunk_gen != gen[use])
-            st = KFS_E_AUTH; /* a chunk left over from another commit */
+                              blob + (size_t)i * block_size, block_size, gen[use],
+                              &chunk_gen);
     }
     if (st == KFS_OK)
         st = kfs_meta_deserialize(m, blob, (size_t)blob_len[use], block_size);

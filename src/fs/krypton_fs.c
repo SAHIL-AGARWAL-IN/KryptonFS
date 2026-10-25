@@ -94,9 +94,7 @@ static kfs_status get_block(kfs_fs *fs, kfs_inode *n, uint32_t index, uint8_t **
         memset(frame, 0, fs->opts.block_size); /* hole */
     } else {
         st = kfs_blockio_read(fs->io, kfs_bid(n->ino, index, want), frame,
-                              fs->opts.block_size, &got);
-        if (st == KFS_OK && got != want)
-            st = KFS_E_AUTH;
+                              fs->opts.block_size, want, &got);
         if (st != KFS_OK) {
             kfs_cache_drop(fs->cache, n->ino, index);
             return st;
@@ -162,7 +160,7 @@ kfs_status kfs_fs_open(kfs_blockio *io, const kfs_fs_opts *opts, kfs_fs **out)
         goto fail;
 
     st = kfs_meta_load(&fs->meta, io, opts->block_size);
-    if (st == KFS_E_NOT_FOUND) {
+    if (st == KFS_E_NOT_FOUND && opts->format_if_empty) {
         st = kfs_meta_init(&fs->meta, opts->block_size, 0755,
                            opts->root_uid, opts->root_gid, now_ns());
         if (st == KFS_OK)

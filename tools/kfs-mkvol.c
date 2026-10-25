@@ -146,6 +146,7 @@ int main(int argc, char **argv)
     memset(&fo, 0, sizeof(fo));
     fo.block_size = block_size;
     fo.cache_bytes = 16ull * block_size;
+    fo.format_if_empty = true;
     fo.root_uid = uid;
     fo.root_gid = gid;
     st = kfs_blockio_init(&io, &cipher, backend);

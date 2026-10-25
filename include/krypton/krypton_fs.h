@@ -45,6 +45,7 @@ typedef struct kfs_fs_opts {
     kfs_scan_action scan_action;
     kfs_audit_fn    audit;         /* optional */
     void           *audit_ctx;
+    bool            format_if_empty; /* only kfs-mkvol formats a volume */
     uint32_t        root_uid;      /* owner of a new volume's root */
     uint32_t        root_gid;
 } kfs_fs_opts;
@@ -67,8 +68,10 @@ typedef int (*kfs_dirent_fn)(void *ctx, const char *name, const kfs_stat *st);
 #define KFS_RENAME_NOREPLACE 1u
 #define KFS_ID_UNCHANGED     UINT32_MAX
 
-/* Loads committed metadata, or formats an empty volume if there is none.
- * io must outlive the filesystem. */
+/* Loads committed metadata. If there is none: with format_if_empty,
+ * formats an empty volume; otherwise KFS_E_NOT_FOUND, so a daemon never
+ * reformats a volume whose metadata it merely failed to find. io must
+ * outlive the filesystem. */
 kfs_status kfs_fs_open(kfs_blockio *io, const kfs_fs_opts *opts, kfs_fs **out);
 
 /* Final sync, then frees everything; returns the sync result. */

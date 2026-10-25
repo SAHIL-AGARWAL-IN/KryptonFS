@@ -72,27 +72,61 @@ kfs_status kfs_blockio_write(kfs_blockio *io, uint64_t block_id,
 }
 
 kfs_status kfs_blockio_read(kfs_blockio *io, uint64_t block_id,
-                            uint8_t *plain, size_t len, uint64_t *generation)
+                            uint8_t *plain, size_t len, uint64_t expect_gen,
+                            uint64_t *generation)
 {
     uint8_t *body = io->scratch + KFS_ENVELOPE_HDR_SIZE;
-    kfs_envelope_hdr env;
-    size_t got = 0;
-    kfs_status st;
+    kfs_status bad = KFS_OK; /* worst integrity failure seen */
+    bool unreachable = false, found = false;
+    uint64_t best = 0;
 
     if (len > KFS_BLOCK_SIZE_MAX)
         return KFS_E_INVAL;
-    st = kfs_backend_get(io->backend, block_id, io->scratch, io->scratch_size, &got);
-    if (st != KFS_OK)
-        return st;
-    if (got != KFS_ENVELOPE_HDR_SIZE + len)
-        return KFS_E_PROTO;
 
-    kfs_envelope_hdr_decode(io->scratch, &env);
-    st = io->cipher.ops->open(io->cipher.ctx, block_id, &env, body, len);
-    if (st != KFS_OK)
-        return st;
-    memcpy(plain, body, len);
-    kfs_wipe(body, len);
-    *generation = env.generation;
-    return KFS_OK;
+    for (uint32_t r = 0; r < io->backend->replicas; r++) {
+        kfs_envelope_hdr env;
+        size_t got = 0;
+        kfs_status st = kfs_backend_get_replica(io->backend, block_id, r, io->scratch,
+                                                io->scratch_size, &got);
+
+        if (st == KFS_E_NOT_FOUND)
+            continue;
+        if (st != KFS_OK && st != KFS_E_PROTO) {
+            unreachable = true;
+            continue;
+        }
+        if (st == KFS_E_PROTO || got != KFS_ENVELOPE_HDR_SIZE + len) {
+            bad = KFS_E_PROTO;
+            continue;
+        }
+
+        /* The generation is authenticated by the tag, so filtering on it
+         * before opening is safe: a forged value fails the open below. */
+        kfs_envelope_hdr_decode(io->scratch, &env);
+        if (expect_gen != KFS_GEN_NEWEST && env.generation != expect_gen) {
+            bad = KFS_E_AUTH;
+            continue;
+        }
+        if (found && env.generation <= best)
+            continue;
+        st = io->cipher.ops->open(io->cipher.ctx, block_id, &env, body, len);
+        if (st != KFS_OK) {
+            bad = st;
+            continue;
+        }
+        memcpy(plain, body, len);
+        kfs_wipe(body, len);
+        best = env.generation;
+        found = true;
+        if (expect_gen != KFS_GEN_NEWEST)
+            break;
+    }
+
+    if (found) {
+        *generation = best;
+        return KFS_OK;
+    }
+    if (bad != KFS_OK)
+        return bad;
+    return unreachable ? KFS_E_UNAVAILABLE : KFS_E_NOT_FOUND;
 }

@@ -12,6 +12,7 @@
 #ifndef KRYPTON_BACKEND_H
 #define KRYPTON_BACKEND_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -21,8 +22,14 @@ typedef struct kfs_backend kfs_backend;
 
 typedef struct kfs_backend_ops {
     kfs_status (*put)(kfs_backend *b, uint64_t id, const uint8_t *buf, size_t len);
-    /* KFS_E_NOT_FOUND if absent; KFS_E_PROTO if larger than cap. */
-    kfs_status (*get)(kfs_backend *b, uint64_t id, uint8_t *buf, size_t cap, size_t *len);
+    /*
+     * Fetches the object from copy holder number replica (0 .. replicas-1,
+     * in the backend's preference order). KFS_E_NOT_FOUND if that holder
+     * lacks it, KFS_E_UNAVAILABLE if it cannot be reached, KFS_E_PROTO if
+     * the object is larger than cap.
+     */
+    kfs_status (*get)(kfs_backend *b, uint64_t id, uint32_t replica,
+                      uint8_t *buf, size_t cap, size_t *len);
     /* Deleting an absent object succeeds. */
     kfs_status (*del)(kfs_backend *b, uint64_t id);
     void       (*close)(kfs_backend *b);
@@ -30,6 +37,7 @@ typedef struct kfs_backend_ops {
 
 struct kfs_backend {
     const kfs_backend_ops *ops;
+    uint32_t               replicas; /* copies a get can be served from */
 };
 
 static inline kfs_status kfs_backend_put(kfs_backend *b, uint64_t id,
@@ -38,10 +46,27 @@ static inline kfs_status kfs_backend_put(kfs_backend *b, uint64_t id,
     return b->ops->put(b, id, buf, len);
 }
 
+static inline kfs_status kfs_backend_get_replica(kfs_backend *b, uint64_t id,
+                                                 uint32_t replica, uint8_t *buf,
+                                                 size_t cap, size_t *len)
+{
+    return b->ops->get(b, id, replica, buf, cap, len);
+}
+
+/* First copy found, trying holders in preference order. */
 static inline kfs_status kfs_backend_get(kfs_backend *b, uint64_t id,
                                          uint8_t *buf, size_t cap, size_t *len)
 {
-    return b->ops->get(b, id, buf, cap, len);
+    kfs_status st = KFS_E_UNAVAILABLE;
+    bool missing = false;
+
+    for (uint32_t r = 0; r < b->replicas; r++) {
+        st = kfs_backend_get_replica(b, id, r, buf, cap, len);
+        if (st == KFS_OK || st == KFS_E_PROTO)
+            return st;
+        missing = missing || st == KFS_E_NOT_FOUND;
+    }
+    return missing ? KFS_E_NOT_FOUND : st;
 }
 
 static inline kfs_status kfs_backend_del(kfs_backend *b, uint64_t id)

@@ -28,8 +28,10 @@
  * TCP delivers in order, so a replayed, dropped or reordered frame leaves
  * the receiver expecting a different seq and the MAC fails: replay
  * protection at zero header cost. kfs_frame_mac_prefix() builds the first
- * 26 bytes of that input. Handshake frames carry an all-zero hmac; they are
- * authenticated by RSA-2048 signatures over the handshake transcript.
+ * 26 bytes of that input. Handshake frames carry an all-zero hmac and are
+ * authenticated by RSA-2048 signatures over the handshake transcript,
+ * except the server's AUTH reply: it is the first MAC'd frame (s2c seq 0)
+ * and confirms both sides derived the same keys. See krypton_rpc.h.
  *
  * Heartbeats (UDP)
  * ----------------
