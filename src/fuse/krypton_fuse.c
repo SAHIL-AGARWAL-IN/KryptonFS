@@ -1,20 +1,24 @@
 /*
  * krypton_fuse.c - kryptonfs: the FUSE client daemon.
  *
- *   kryptonfs [-c CONFIG] --local-store DIR [MOUNTPOINT] [FUSE options]
+ *   kryptonfs [-c CONFIG] [--local-store DIR] [MOUNTPOINT] [FUSE options]
+ *
+ * Blocks live on the storage cluster from [cluster], or in a local
+ * directory with --local-store (single machine, no replication).
  *
  * Start-up order is what keeps secrets out of the scan workers:
  *
- *   1. read the volume header (unencrypted) for the block size
- *   2. fork the scan pool: no passphrase or key exists in memory yet
+ *   1. fork the scan pool: no identity key, passphrase or volume key
+ *      exists in memory yet (slots are sized for the largest block, since
+ *      the header has not been read)
+ *   2. open the backend (the cluster backend loads this host's identity)
+ *      and read the volume header
  *   3. read the passphrase, unlock the volume key, derive block keys
  *   4. fork the crypto pool with the keys; wipe every copy held here
  *   5. mount; all sealing, opening and scanning goes through the pools
  *
  * The daemon stays in the foreground: daemonizing would fork after the
  * pools exist and orphan them. Run it under a supervisor (e.g. systemd).
- * Until Phase 4 adds the replicated network backend, blocks live in a
- * local directory given with --local-store.
  */
 #define _GNU_SOURCE
 #define FUSE_USE_VERSION 31
@@ -36,6 +40,7 @@
 #include "krypton/krypton_config.h"
 #include "krypton/krypton_fs.h"
 #include "krypton/krypton_meta.h"
+#include "krypton/krypton_net_backend.h"
 #include "krypton/krypton_passphrase.h"
 #include "krypton/krypton_sandbox.h"
 #include "krypton/krypton_scanner.h"
@@ -383,9 +388,9 @@ static const struct fuse_opt CLI_SPEC[] = {
 static void usage(const char *prog)
 {
     fprintf(stderr,
-            "usage: %s [-c CONFIG] --local-store DIR [MOUNTPOINT] [FUSE options]\n"
+            "usage: %s [-c CONFIG] [--local-store DIR] [MOUNTPOINT] [FUSE options]\n"
             "  -c, --config=FILE     configuration (default /etc/kryptonfs/kryptonfs.conf)\n"
-            "  --local-store=DIR     block store created by kfs-mkvol\n"
+            "  --local-store=DIR     use a local block store instead of the [cluster]\n"
             "MOUNTPOINT defaults to [volume] mountpoint.\n",
             prog);
 }
@@ -418,27 +423,11 @@ static kfs_status build_scanner(const kfs_config *cfg, kfs_scanner **out)
     return KFS_OK;
 }
 
-/* Steps 1-4 of the start-up order described at the top of this file. */
-static int start_sandbox(daemon_ctx *d)
+/* Step 1 of the start-up order described at the top of this file. */
+static int start_scan_pool(daemon_ctx *d)
 {
-    static char pass[KFS_PASSPHRASE_MAX];
-    uint8_t hdr[KFS_VOLUME_HDR_SIZE], volume_key[KFS_KEY_SIZE];
-    kfs_volume_header vh;
-    kfs_block_keys keys;
     kfs_sandbox_opts so;
-    size_t hdr_len = 0, pass_len = 0;
     kfs_status st;
-
-    st = kfs_backend_get(d->backend, KFS_BID_VOLUME_HEADER, hdr, sizeof(hdr), &hdr_len);
-    if (st == KFS_E_NOT_FOUND) {
-        fprintf(stderr, "kryptonfs: no volume in the store; create one with kfs-mkvol\n");
-        return -1;
-    }
-    d->block_size = st == KFS_OK && hdr_len == sizeof(hdr) ? kfs_volume_block_size(hdr) : 0;
-    if (d->block_size == 0) {
-        fprintf(stderr, "kryptonfs: unreadable volume header\n");
-        return -1;
-    }
 
     if (build_scanner(&d->cfg, &d->scanner) != KFS_OK)
         return -1;
@@ -447,7 +436,7 @@ static int start_sandbox(daemon_ctx *d)
     so.scan_workers = d->cfg.sandbox.scan_workers;
     so.crypto_workers = d->cfg.sandbox.crypto_workers;
     so.slots = d->cfg.sandbox.ipc_slots;
-    so.block_size = d->block_size;
+    so.block_size = KFS_BLOCK_SIZE_MAX; /* the header is not read yet */
     so.scanner = d->scanner;
     so.block_elf = d->cfg.scanner.block_elf;
     so.drop_privileges = true;
@@ -460,19 +449,92 @@ static int start_sandbox(daemon_ctx *d)
                 so.chroot_dir, kfs_strerror(st));
         return -1;
     }
+    return 0;
+}
+
+/* Step 2. */
+static int open_backend(daemon_ctx *d, const char *local_store)
+{
+    char err[512] = "";
+
+    if (local_store != NULL) {
+        if (kfs_backend_open_local(local_store, &d->backend) != KFS_OK) {
+            fprintf(stderr, "kryptonfs: %s: not a directory\n", local_store);
+            return -1;
+        }
+    } else if (kfs_backend_open_cluster(&d->cfg, &d->backend, err, sizeof(err)) != KFS_OK) {
+        fprintf(stderr, "kryptonfs: cannot join the cluster: %s\n", err);
+        return -1;
+    }
+    return 0;
+}
+
+/*
+ * The header is the one unencrypted object, so a replica can corrupt it
+ * without the block layer noticing. Try each replica's copy until one
+ * authenticates under the passphrase; the block size is taken from that
+ * copy only.
+ */
+static kfs_status unlock_any_replica(daemon_ctx *d, const char *pass, size_t pass_len,
+                                     kfs_volume_header *vh, uint8_t volume_key[KFS_KEY_SIZE])
+{
+    bool seen = false, unreachable = false;
+
+    for (uint32_t r = 0; r < d->backend->replicas; r++) {
+        uint8_t hdr[KFS_VOLUME_HDR_SIZE];
+        size_t len = 0;
+        kfs_status st = kfs_backend_get_replica(d->backend, KFS_BID_VOLUME_HEADER, r,
+                                                hdr, sizeof(hdr), &len);
+
+        if (st == KFS_E_NOT_FOUND)
+            continue;
+        if (st != KFS_OK && st != KFS_E_PROTO) {
+            unreachable = true;
+            continue;
+        }
+        seen = true;
+        if (st == KFS_OK && len == sizeof(hdr) &&
+            kfs_volume_unlock(hdr, pass, pass_len, vh, volume_key) == KFS_OK)
+            return KFS_OK;
+    }
+    if (seen)
+        return KFS_E_AUTH;
+    return unreachable ? KFS_E_UNAVAILABLE : KFS_E_NOT_FOUND;
+}
+
+/* Steps 3 and 4. */
+static int unlock_volume(daemon_ctx *d)
+{
+    static char pass[KFS_PASSPHRASE_MAX];
+    uint8_t volume_key[KFS_KEY_SIZE];
+    kfs_volume_header vh;
+    kfs_block_keys keys;
+    size_t pass_len = 0;
+    kfs_status st;
 
     mlock(pass, sizeof(pass));
     mlock(volume_key, sizeof(volume_key));
     mlock(&keys, sizeof(keys));
     if (kfs_read_passphrase("Volume passphrase: ", false, pass, sizeof(pass), &pass_len) != KFS_OK)
         return -1;
-    st = kfs_volume_unlock(hdr, pass, pass_len, &vh, volume_key);
+    st = unlock_any_replica(d, pass, pass_len, &vh, volume_key);
     kfs_wipe(pass, sizeof(pass));
+    if (st == KFS_E_NOT_FOUND) {
+        fprintf(stderr, "kryptonfs: no volume found; create one with kfs-mkvol\n");
+        return -1;
+    }
+    if (st == KFS_E_UNAVAILABLE) {
+        fprintf(stderr, "kryptonfs: no replica of the volume header is reachable\n");
+        return -1;
+    }
+    if (st == KFS_OK)
+        d->block_size = vh.block_size;
     if (st == KFS_OK)
         st = kfs_block_keys_derive(volume_key, &keys);
     kfs_wipe(volume_key, sizeof(volume_key));
     if (st == KFS_E_AUTH) {
-        fprintf(stderr, "kryptonfs: wrong passphrase (or tampered volume header)\n");
+        fprintf(stderr, "kryptonfs: wrong passphrase (or every copy of the volume header "
+                        "is tampered)\n");
         return -1;
     }
     if (st == KFS_OK)
@@ -508,6 +570,11 @@ static int open_fs(daemon_ctx *d)
     fo.audit = audit;
     fo.audit_ctx = d;
     st = kfs_fs_open(&d->io, &fo, &d->fs);
+    if (st == KFS_E_NOT_FOUND) {
+        fprintf(stderr, "kryptonfs: the volume header exists but its metadata does not; "
+                        "refusing to reformat it\n");
+        return -1;
+    }
     if (st != KFS_OK) {
         fprintf(stderr, "kryptonfs: cannot open volume: %s%s\n", kfs_strerror(st),
                 st == KFS_E_NOMEM && fo.lock_memory
@@ -539,9 +606,9 @@ int main(int argc, char **argv)
     openlog("kryptonfs", LOG_PID | LOG_PERROR, LOG_DAEMON); /* foreground: mirror to stderr */
     if (fuse_opt_parse(&args, &cli, CLI_SPEC, keep_arg) != 0)
         return 2;
-    if (cli.help || cli.store == NULL) {
+    if (cli.help) {
         usage(argv[0]);
-        return cli.help ? 0 : 2;
+        return 0;
     }
     if (geteuid() != 0) {
         fprintf(stderr, "kryptonfs: must start as root to chroot and drop privileges "
@@ -556,12 +623,9 @@ int main(int argc, char **argv)
         fprintf(stderr, "kryptonfs: %s\n", err);
         return 1;
     }
-    if (kfs_backend_open_local(cli.store, &d.backend) != KFS_OK) {
-        fprintf(stderr, "kryptonfs: %s: not a directory\n", cli.store);
-        return 1;
-    }
 
-    if (start_sandbox(&d) == 0 && open_fs(&d) == 0) {
+    if (start_scan_pool(&d) == 0 && open_backend(&d, cli.store) == 0 &&
+        unlock_volume(&d) == 0 && open_fs(&d) == 0) {
         /* Foreground, so the worker pools stay children of this process.
          * The kernel enforces permissions from the stored modes. */
         fuse_opt_add_arg(&args, "-f");

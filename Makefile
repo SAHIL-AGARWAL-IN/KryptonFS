@@ -4,7 +4,7 @@
 #   make test      build + run unit tests
 #   make release   optimized, fortified build + tests in build-release/
 #   make asan      AddressSanitizer + UBSan build + tests in build-asan/
-#   make integration  mount a real volume end to end (Linux, root)
+#   make integration  real mounts end to end, local and 3-node (Linux, root)
 #   make clean     remove all build directories
 
 BUILD_DIR  ?= build
@@ -32,6 +32,7 @@ asan:
 
 integration: build
 	tests/integration/fuse_smoke.sh $(BUILD_DIR)
+	tests/integration/cluster_smoke.sh $(BUILD_DIR)
 
 clean:
 	rm -rf build build-release build-asan

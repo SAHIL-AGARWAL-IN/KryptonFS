@@ -53,7 +53,10 @@ heartbeat_timeout_ms = 3000
 rpc_timeout_ms = 5000
 
 [node]
-# example; required by kfs-noded and must match one of the peer ids above
+# example; required. This host's identity in handshakes, signed with
+# [crypto] node_key. A storage node must use one of the peer ids above; a
+# client uses an id of its own (its <id>.pub.pem goes into every node's
+# trusted_keys). The keys below configure kfs-noded only.
 id = 1
 bind = 0.0.0.0
 rpc_port = 7400

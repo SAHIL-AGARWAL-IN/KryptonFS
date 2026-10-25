@@ -53,20 +53,22 @@ static inline kfs_status kfs_backend_get_replica(kfs_backend *b, uint64_t id,
     return b->ops->get(b, id, replica, buf, cap, len);
 }
 
-/* First copy found, trying holders in preference order. */
+/* First copy found, trying holders in preference order. KFS_E_NOT_FOUND
+ * only if every holder answered that it has none; if any was unreachable
+ * the answer is unknown, KFS_E_UNAVAILABLE. */
 static inline kfs_status kfs_backend_get(kfs_backend *b, uint64_t id,
                                          uint8_t *buf, size_t cap, size_t *len)
 {
-    kfs_status st = KFS_E_UNAVAILABLE;
-    bool missing = false;
+    bool unreachable = false;
 
     for (uint32_t r = 0; r < b->replicas; r++) {
-        st = kfs_backend_get_replica(b, id, r, buf, cap, len);
+        kfs_status st = kfs_backend_get_replica(b, id, r, buf, cap, len);
+
         if (st == KFS_OK || st == KFS_E_PROTO)
             return st;
-        missing = missing || st == KFS_E_NOT_FOUND;
+        unreachable = unreachable || st != KFS_E_NOT_FOUND;
     }
-    return missing ? KFS_E_NOT_FOUND : st;
+    return unreachable ? KFS_E_UNAVAILABLE : KFS_E_NOT_FOUND;
 }
 
 static inline kfs_status kfs_backend_del(kfs_backend *b, uint64_t id)

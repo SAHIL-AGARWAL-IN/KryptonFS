@@ -28,22 +28,28 @@ hold keys.
 
 ### Write path
 
-1. `write(2)` reaches the FUSE `write` callback, which updates the plaintext
-   page cache and marks the block dirty.
-2. On writeback, the daemon takes a free arena slot, copies the plaintext
-   into it, and sends `SCAN` to the scan pool. A malware match fails the
-   write (`EACCES`) or raises an audit event, depending on `[scanner] action`.
-3. It sends `SEAL` to the crypto pool, which picks a random IV, encrypts the
-   slot in place with AES-256-CTR and writes the HMAC tag into the slot's
-   envelope header.
-4. The daemon sends `BLOCK_WRITE` with the envelope to the block's primary
-   node, chosen by hashing `block_id` over the healthy peers. The primary
-   persists it and forwards `REPLICATE` to the next `replication - 1` peers.
+1. `write(2)` reaches the FUSE `write` callback. The new block contents are
+   staged in a candidate buffer, copied into an arena slot and sent as
+   `SCAN` to the scan pool. A malware match fails the write (`EACCES`) and
+   leaves the file untouched, or only raises an audit event, depending on
+   `[scanner] action`. Clean contents enter the page cache, dirty.
+2. On writeback (eviction, every `writeback_ms`, or `fsync`) the block gets
+   a fresh generation and goes as `SEAL` to the crypto pool, which picks a
+   random IV, encrypts the slot in place with AES-256-CTR and writes the
+   HMAC tag into the slot's envelope header.
+3. The daemon sends `BLOCK_WRITE` with the envelope to the first healthy
+   node of the block's replica set (rendezvous hashing over all peers).
+   That node persists it and forwards `REPLICATE` to the other replicas.
+4. Metadata (including the block's new generation) is committed after the
+   data it references.
 
 ### Read path
 
-`BLOCK_READ` returns the newest envelope; `OPEN` checks the tag before
-decrypting, so a tampered or swapped block is an I/O error, never garbage
+The daemon asks the block's replicas one at a time for the envelope. A
+copy is accepted only if its tag verifies (`OPEN`, in the crypto pool) and
+its generation is the one metadata expects; a stale replica that missed a
+write, or a tampered copy, is skipped for the next replica. If no replica
+has an acceptable copy, the read fails with `EIO`, never garbage
 plaintext.
 
 ## Wire formats
@@ -76,18 +82,25 @@ KDF parameters, block size and the wrapped volume key, so any client with
 the passphrase can mount, and changing the passphrase rewraps one key
 instead of re-encrypting the volume.
 
-Every host has an RSA-2048 key pair. Peers' public keys are pinned in
-`[crypto] trusted_keys`; the RPC handshake signs both sides' nonces and
-ephemeral X25519 shares with them, then derives the session key.
+Every host, clients included, has an RSA-2048 key pair and an id
+(`[node] id`). Peers' public keys are pinned in `[crypto] trusted_keys`;
+the RPC handshake (`include/krypton/krypton_rpc.h`) signs the transcript,
+including both sides' nonces and ephemeral X25519 shares, with them, then
+derives per-direction session keys.
+
+The header is the only unencrypted object. Its parameters are bound into
+the key derivation, so an edited copy fails to unlock; the client tries
+each replica's copy until one authenticates.
 
 ## Threat model
 
 | Adversary                 | Protection                                                                 |
 |---------------------------|----------------------------------------------------------------------------|
-| Storage node operator     | Sees only ciphertext. Tags detect tampering; binding `block_id` detects swapped blocks. |
+| Storage node operator     | Sees only ciphertext. Tags detect tampering; binding `block_id` detects swapped blocks; generations in metadata detect stale copies. A tampered or stale replica is skipped in favour of an honest one. |
 | Network attacker          | Mutually authenticated handshake with pinned keys; forward secrecy; per-frame MACs with implicit sequence numbers stop replay, reordering and injection. |
-| Spoofed heartbeats        | HMAC with the cluster key plus a monotonic sequence number per node.      |
-| Malicious file content    | Parsed only in scan workers: no keys, chrooted, unprivileged.             |
+| Rogue client              | Unpinned identities are dropped during the handshake. `REPLICATE` is accepted only from cluster peers. |
+| Spoofed heartbeats        | HMAC with the cluster key plus a monotonic sequence number per node. A forged DOWN cannot hide data (replica sets ignore health); it only reorders who is asked first. |
+| Malicious file content    | Parsed only in scan workers: no keys, no identity, no passphrase, chrooted, unprivileged. |
 
 ### Rollback and crash safety
 
@@ -113,6 +126,15 @@ Known limits, to address in later phases:
 - **Access patterns.** Block ids expose inode numbers and block indexes,
   so storage nodes learn file count and approximate sizes (never names or
   contents). Keyed block-id hashing would hide this.
+- **No anti-entropy repair.** A replica that was down during a write stays
+  stale until that block is rewritten; reads route around it, but the
+  block has one fewer good copy meanwhile. A background scrubber
+  comparing `BLOCK_STAT` generations across replicas would re-replicate.
+- **Writes are best-effort replicated.** A write succeeds once one replica
+  stores it; replicas that cannot be reached miss it (and are logged).
+- **Heartbeats are IPv4-only.** RPC works over IPv4 and IPv6.
+- **Single global lock** in the filesystem core, and one connection per
+  peer: correct, but parallel I/O is serialized.
 - **Compromised crypto worker.** It holds the keys. Its input is fixed-size
   buffers with no parsing, which keeps that surface small; a seccomp-bpf
   allowlist would shrink it further.
@@ -132,6 +154,8 @@ Places where the implementation goes beyond the letter of the spec:
 | SysV queues carry block payloads      | Queues carry 48-byte descriptors; bytes live in a shared mmap arena | Default `kernel.msgmnb` is 16 KiB per queue (about three 4 KiB blocks); the arena is also zero-copy. |
 | One sandbox for crypto and parsing    | Two pools: scan (no keys) and crypto (no parsing)          | A parser exploit must not reach key material. |
 | RSA-2048 node handshake               | RSA-2048 signatures over ephemeral X25519 key exchange     | Forward secrecy: a stolen node key cannot decrypt recorded traffic. |
+| Node-to-node authentication           | Clients authenticate the same way, with their own identity | A storage node should only serve hosts it can name. |
+| Replication logic on nodes            | Rendezvous placement; the receiving node forwards to the other replicas | Every host computes replica sets alone; adding a node moves only the blocks it wins. |
 | C or C++                              | C11 throughout                                             | FUSE, SysV IPC, sockets and OpenSSL are C APIs; one toolchain. |
 | Textual TUI or web dashboard          | Textual TUI                                                | Runs over SSH beside the daemon, with no JS build. |
 
@@ -168,7 +192,10 @@ KryptonFS/
 │   ├── krypton_meta.h                 [P3] inode table, crash-safe commits
 │   ├── krypton_cache.h                [P3] mmap page cache
 │   ├── krypton_fs.h                   [P3] filesystem operations
-│   ├── krypton_rpc.h                  [P4] RPC client/server, handshake
+│   ├── krypton_rpc.h                  [P4] handshake, MAC'd framing, payload layouts
+│   ├── krypton_pool.h                 [P4] pinned per-peer connections
+│   ├── krypton_cluster.h              [P4] placement, health, heartbeats
+│   ├── krypton_net_backend.h          [P4] the cluster as a block backend
 │   └── krypton_telemetry.h            [P5] metrics and audit events
 ├── src/
 │   ├── common/                        [P1] libkfs_common: portable, no dependencies
@@ -192,15 +219,15 @@ KryptonFS/
 │   │   └── krypton_fs.c               path operations, scan-gated writes
 │   ├── fuse/                          [P3] kryptonfs binary
 │   │   └── krypton_fuse.c             FUSE callbacks, sandbox wiring, main
-│   ├── net/                           [P4] shared by client and node
-│   │   ├── rpc_conn.c                 framed, MAC'd send/recv
-│   │   ├── rpc_handshake.c
-│   │   └── heartbeat.c                UDP beat/ping/pong, failure detection
+│   ├── net/                           [P4] libkfs_net (Linux): shared by client and node
+│   │   ├── rpc_conn.c                 framed, MAC'd send/recv, TCP helpers
+│   │   ├── rpc_handshake.c            RSA-PSS + X25519 mutual authentication
+│   │   ├── pool.c                     per-peer connections, redial on failure
+│   │   ├── cluster.c                  rendezvous placement, health table
+│   │   ├── heartbeat.c                UDP beat/ping/pong, failure detection
+│   │   └── backend_net.c              client backend: replica-ordered I/O
 │   ├── node/                          [P4] kfs-noded binary
-│   │   ├── main.c
-│   │   ├── rpc_storage_node.c         multithreaded TCP server
-│   │   ├── block_store.c              envelope persistence
-│   │   └── replication.c              placement + REPLICATE fan-out
+│   │   └── kfs_noded.c                thread-pool TCP server, storage, replication
 │   └── telemetry/                     [P5]
 │       └── telemetry_server.c         Unix-socket JSON-lines publisher
 ├── tools/
@@ -229,7 +256,9 @@ KryptonFS/
     ├── test_scanner.c                 [P2]
     ├── test_sandbox.c                 [P3] jail, fail-closed, concurrency
     ├── test_fs.c                      [P3] crash, rollback, tamper, at-rest secrecy
+    ├── test_rpc.c                     [P4] handshake, impostors, tamper, replay
+    ├── test_cluster.c                 [P4] placement, health, live heartbeats
     └── integration/
         ├── fuse_smoke.sh              [P3] real mount, end to end
-        └── cluster_*.sh               [P4] multi-node cluster scripts
+        └── cluster_smoke.sh           [P4] 3 nodes + client: replication, failure, tamper
 ```

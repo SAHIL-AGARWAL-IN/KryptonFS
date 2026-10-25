@@ -4,6 +4,6 @@ kfs_apply_defaults(kfs-keygen)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(kfs-mkvol kfs-mkvol.c)
-    target_link_libraries(kfs-mkvol PRIVATE kfs::fs)
+    target_link_libraries(kfs-mkvol PRIVATE kfs::fs kfs::net)
     kfs_apply_defaults(kfs-mkvol)
 endif()

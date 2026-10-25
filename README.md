@@ -16,7 +16,7 @@ model and full project layout.
 | 1     | Scaffolding, wire formats, IPC layout, config      | done    |
 | 2     | Cryptography, node keys and malware scanner        | done    |
 | 3     | FUSE driver, sandbox workers, IPC                  | done    |
-| 4     | Storage node server, replication, heartbeats       | planned |
+| 4     | Storage node server, replication, heartbeats       | done    |
 | 5     | Telemetry and dashboard                            | planned |
 
 ## Building
@@ -30,7 +30,7 @@ make              # Debug build in build/
 make test         # build and run the unit tests
 make release      # optimized, fortified build in build-release/, then tests
 make asan         # AddressSanitizer + UBSan build in build-asan/, then tests
-sudo make integration  # mount a real volume and exercise it end to end
+sudo make integration  # real mounts end to end: local store and a 3-node cluster
 ```
 
 Or with CMake directly:
@@ -62,37 +62,49 @@ default capabilities already cover `chroot` and `setuid`. Add
 `--cap-add SYS_PTRACE` to let the sandbox test read the workers' chroot
 path (they are non-dumpable, which hides it otherwise).
 
-## Using a volume
+## Running a cluster
 
-Until Phase 4 adds storage nodes, blocks live in a local directory:
-
-```sh
-mkdir -p /srv/krypton-store /mnt/krypton /var/empty/kryptonfs
-kfs-mkvol --local-store /srv/krypton-store --owner "$(id -u):$(id -g)"
-sudo kryptonfs -c /etc/kryptonfs/kryptonfs.conf \
-    --local-store=/srv/krypton-store /mnt/krypton
-```
-
-Both prompt for the passphrase on the terminal; they also accept it on
-stdin or in `$KRYPTONFS_PASSPHRASE` for automation. `kryptonfs` must start
-as root so it can jail its workers, stays in the foreground (run it under
-systemd or similar), and unmounts cleanly with `fusermount3 -u` or Ctrl-C.
-Writes rejected by the malware scanner fail with "Permission denied" and
-are logged to syslog.
-
-## Keys
-
-Each host needs an RSA-2048 identity, and the cluster shares one
-heartbeat key:
+**1. Identities.** Every host (storage node or client) has an RSA-2048
+identity and an id, set as `[node] id` in its config. The cluster shares
+one heartbeat key:
 
 ```sh
-kfs-keygen node 1 /etc/kryptonfs/keys          # node.key.pem + 1.pub.pem
-kfs-keygen cluster /etc/kryptonfs/keys/cluster.key
+kfs-keygen node 1 /etc/kryptonfs/keys               # node.key.pem + 1.pub.pem
+kfs-keygen cluster /etc/kryptonfs/keys/cluster.key  # once; copy to every host
 ```
 
-Copy every host's `<id>.pub.pem` into each peer's `trusted_keys`
-directory; handshakes from unpinned keys are refused. `kfs-keygen` never
-overwrites existing files.
+Copy every host's `<id>.pub.pem` into every other host's `trusted_keys`
+directory. Handshakes from keys not pinned there are refused, in both
+directions. `kfs-keygen` never overwrites existing files.
+
+**2. Storage nodes.** List every node under `[cluster]` (identical on all
+hosts), give each its own `[node]` section, and start:
+
+```sh
+kfs-noded -c /etc/kryptonfs/kryptonfs.conf     # foreground; SIGTERM stops it
+```
+
+**3. Volume and mount.** From a client host:
+
+```sh
+mkdir -p /mnt/krypton /var/empty/kryptonfs
+kfs-mkvol -c /etc/kryptonfs/kryptonfs.conf --owner "$(id -u):$(id -g)"
+sudo kryptonfs -c /etc/kryptonfs/kryptonfs.conf /mnt/krypton
+```
+
+Each block is stored on `replication` nodes chosen by rendezvous hashing.
+Reads verify every copy and skip stale or tampered ones, so the volume
+stays readable while one replica of each block is up and honest.
+
+For a single machine, `--local-store DIR` on both `kfs-mkvol` and
+`kryptonfs` keeps blocks in a local directory instead.
+
+Both tools prompt for the passphrase on the terminal; they also accept it
+on stdin or in `$KRYPTONFS_PASSPHRASE` for automation. `kryptonfs` must
+start as root so it can jail its workers, stays in the foreground (run it
+under systemd or similar), and unmounts cleanly with `fusermount3 -u` or
+Ctrl-C. Writes rejected by the malware scanner fail with "Permission
+denied" and are logged to syslog.
 
 ## Configuration
 

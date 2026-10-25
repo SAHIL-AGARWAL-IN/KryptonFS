@@ -168,6 +168,14 @@ static void test_validation(void)
     expect_invalid(KFS_ROLE_CLIENT, "[crypto]\nnode_key =\n", "node_key is required");
     expect_invalid(KFS_ROLE_CLIENT, "[telemetry]\nsocket = \"\"\n", "socket is required");
     expect_invalid(KFS_ROLE_NODE, "[node]\nid = 5\n", "id 5 does not appear");
+    {
+        /* Clients need an identity too. */
+        reset();
+        CHECK_EQ(parse(MINIMAL), KFS_OK);
+        cfg.node.node_id = 0;
+        CHECK_EQ(kfs_config_validate(&cfg, KFS_ROLE_CLIENT, err, sizeof(err)), KFS_E_CONFIG);
+        CHECK(strstr(err, "client's identity") != NULL);
+    }
     expect_invalid(KFS_ROLE_NODE, "[node]\ndata_dir = data\n", "data_dir");
 
     /* Settings irrelevant to a role do not block it. */

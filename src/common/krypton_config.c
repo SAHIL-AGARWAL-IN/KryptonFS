@@ -578,6 +578,8 @@ kfs_status kfs_config_validate(const kfs_config *cfg, kfs_role role,
 
         REQUIRE(is_abs_path(cfg->volume.mountpoint),
                 "[volume] mountpoint must be an absolute path");
+        REQUIRE(cfg->node.node_id != 0,
+                "[node] id is required: it is this client's identity in handshakes");
         REQUIRE(cl->peer_count > 0, "[cluster] at least one peer is required");
         REQUIRE(is_abs_path(sb->chroot_dir) && strcmp(sb->chroot_dir, "/") != 0,
                 "[sandbox] chroot_dir must be an absolute path other than /");

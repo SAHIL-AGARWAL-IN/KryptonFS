@@ -45,6 +45,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_subdirectory(src/fs)
     add_subdirectory(src/net)
     add_subdirectory(src/fuse)
+    add_subdirectory(src/node)
 endif()
 add_subdirectory(tools)
 # Later phases add: src/net, src/node (4); src/telemetry (5).
