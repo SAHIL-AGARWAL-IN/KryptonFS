@@ -1,4 +1,6 @@
 add_library(kfs_net STATIC
+    cluster.c
+    heartbeat.c
     rpc_conn.c
     rpc_handshake.c)
 add_library(kfs::net ALIAS kfs_net)

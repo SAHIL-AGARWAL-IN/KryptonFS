@@ -38,6 +38,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(test_rpc PRIVATE kfs::net)
     kfs_apply_defaults(test_rpc)
     add_test(NAME rpc COMMAND test_rpc)
+
+    add_executable(test_cluster test_cluster.c)
+    target_link_libraries(test_cluster PRIVATE kfs::net)
+    kfs_apply_defaults(test_cluster)
+    add_test(NAME cluster COMMAND test_cluster)
 endif()
 
 # The shipped example configuration must always load and validate.
