@@ -1,2 +1,5 @@
-# Linux-targeted project: keep LF everywhere, even on Windows checkouts.
+# Linux-targeted project: keep LF everywhere, even on Windows checkouts...
 * text=auto eol=lf
+# ...except the Windows launchers, which cmd.exe and PowerShell expect as CRLF.
+*.cmd text eol=crlf
+*.ps1 text eol=crlf

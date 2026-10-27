@@ -9,6 +9,30 @@ health and security events.
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design, threat
 model and full project layout.
 
+## Quick start
+
+All you need is [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+(Windows, macOS) or Docker (Linux). One command builds everything and starts
+a working demo: three storage nodes, an encrypted volume with sample files,
+and the live dashboard.
+
+| Windows (double-click or PowerShell) | Linux / macOS     | What it does                                  |
+|--------------------------------------|-------------------|-----------------------------------------------|
+| `run.cmd`                            | `./run.sh`        | start the demo and open the dashboard         |
+| `run.cmd -Dashboard`                 | `./run.sh dashboard` | reopen the dashboard                       |
+| `run.cmd -Shell`                     | `./run.sh shell`  | Linux shell inside it; your files are in `/mnt/krypton` |
+| `run.cmd -Stop`                      | `./run.sh stop`   | stop everything                               |
+
+On Windows, `run.cmd` starts Docker Desktop for you if it is not running.
+The first start takes a few minutes to download and build; later starts take
+seconds. In the dashboard press `q` to close it; the demo keeps running.
+
+Things to try in the shell: `ls -R /mnt/krypton` (your files, decrypted),
+`ls -R /demo/data1` (what a storage node actually holds: encrypted blocks
+only), or `printf '\x7fELF' > /mnt/krypton/x` (blocked by the malware
+scanner). The demo uses throwaway keys and a fixed passphrase: never put
+real data in it.
+
 ## Status
 
 | Phase | Scope                                              | State   |
