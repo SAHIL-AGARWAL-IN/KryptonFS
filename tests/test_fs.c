@@ -467,6 +467,18 @@ static void test_rollback_detected(void)
     CHECK_EQ(mount_close(&mt), 0);
 }
 
+static int bad_copy_calls;
+static kfs_bad_copy bad_copy_why;
+
+static void on_bad_copy(void *ctx, uint64_t block_id, uint32_t replica, kfs_bad_copy why)
+{
+    (void)ctx;
+    (void)block_id;
+    (void)replica;
+    bad_copy_calls++;
+    bad_copy_why = why;
+}
+
 static void test_tamper_detected(void)
 {
     uint8_t obj[KFS_ENVELOPE_HDR_SIZE + BS];
@@ -493,11 +505,15 @@ static void test_tamper_detected(void)
     }
     if (!mount_open(&mt, 16 * BS, KFS_SCAN_REJECT))
         return;
+    bad_copy_calls = 0;
+    mt.io.on_bad_copy = on_bad_copy;
     {
         char buf[32];
 
         CHECK_EQ(kfs_fs_read(mt.fs, "/f", (uint8_t *)buf, sizeof(buf), 0), -EIO);
     }
+    CHECK_EQ(bad_copy_calls, 1); /* the damaged copy is reported, not just failed */
+    CHECK_EQ(bad_copy_why, KFS_COPY_FORGED);
     CHECK_EQ(mount_close(&mt), 0);
 }
 

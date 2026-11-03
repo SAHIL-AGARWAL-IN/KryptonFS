@@ -146,6 +146,24 @@ static void audit(void *ctx, const char *path, const kfs_scan_hit *hit, bool blo
                         blocked ? "blocked" : "allowed", path, sig, hit->offset);
 }
 
+/* Reads fall back to another replica, so this is the only sign that a
+ * storage node holds damaged or stale data. */
+static void bad_copy(void *ctx, uint64_t block_id, uint32_t replica, kfs_bad_copy why)
+{
+    daemon_ctx *d = ctx;
+    static const char *const what[] = {
+        [KFS_COPY_MALFORMED] = "was malformed",
+        [KFS_COPY_STALE]     = "was an old version (a missed write or a rollback)",
+        [KFS_COPY_FORGED]    = "failed its integrity check",
+    };
+
+    syslog(LOG_WARNING, "block %016llx: copy %u %s",
+           (unsigned long long)block_id, replica + 1, what[why]);
+    kfs_telemetry_event(d->tel, why == KFS_COPY_STALE ? KFS_EV_WARN : KFS_EV_ALERT,
+                        "integrity", "block %016llx: copy %u %s",
+                        (unsigned long long)block_id, replica + 1, what[why]);
+}
+
 /* ---------------------------------------------------------------------
  * FUSE callbacks
  * ------------------------------------------------------------------- */
@@ -586,6 +604,8 @@ static int open_fs(daemon_ctx *d)
     if (kfs_blockio_init(&d->io, &cipher, d->backend) != KFS_OK)
         return -1;
     d->io_ready = true;
+    d->io.on_bad_copy = bad_copy;
+    d->io.bad_copy_ctx = d;
 
     memset(&fo, 0, sizeof(fo));
     fo.block_size = d->block_size;

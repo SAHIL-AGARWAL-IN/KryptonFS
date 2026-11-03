@@ -34,6 +34,8 @@ kfs_status kfs_blockio_init(kfs_blockio *io, const kfs_cipher *cipher,
 {
     io->cipher = *cipher;
     io->backend = backend;
+    io->on_bad_copy = NULL;
+    io->bad_copy_ctx = NULL;
     io->scratch_size = KFS_ENVELOPE_HDR_SIZE + KFS_BLOCK_SIZE_MAX;
     io->scratch = calloc(1, io->scratch_size);
     if (io->scratch == NULL)
@@ -71,6 +73,13 @@ kfs_status kfs_blockio_write(kfs_blockio *io, uint64_t block_id,
     return st;
 }
 
+static void report_bad(kfs_blockio *io, uint64_t block_id, uint32_t replica,
+                       kfs_bad_copy why)
+{
+    if (io->on_bad_copy != NULL)
+        io->on_bad_copy(io->bad_copy_ctx, block_id, replica, why);
+}
+
 kfs_status kfs_blockio_read(kfs_blockio *io, uint64_t block_id,
                             uint8_t *plain, size_t len, uint64_t expect_gen,
                             uint64_t *generation)
@@ -97,6 +106,7 @@ kfs_status kfs_blockio_read(kfs_blockio *io, uint64_t block_id,
         }
         if (st == KFS_E_PROTO || got != KFS_ENVELOPE_HDR_SIZE + len) {
             bad = KFS_E_PROTO;
+            report_bad(io, block_id, r, KFS_COPY_MALFORMED);
             continue;
         }
 
@@ -105,6 +115,7 @@ kfs_status kfs_blockio_read(kfs_blockio *io, uint64_t block_id,
         kfs_envelope_hdr_decode(io->scratch, &env);
         if (expect_gen != KFS_GEN_NEWEST && env.generation != expect_gen) {
             bad = KFS_E_AUTH;
+            report_bad(io, block_id, r, KFS_COPY_STALE);
             continue;
         }
         if (found && env.generation <= best)
@@ -112,6 +123,8 @@ kfs_status kfs_blockio_read(kfs_blockio *io, uint64_t block_id,
         st = io->cipher.ops->open(io->cipher.ctx, block_id, &env, body, len);
         if (st != KFS_OK) {
             bad = st;
+            if (st == KFS_E_AUTH) /* not a crypto-worker failure */
+                report_bad(io, block_id, r, KFS_COPY_FORGED);
             continue;
         }
         memcpy(plain, body, len);

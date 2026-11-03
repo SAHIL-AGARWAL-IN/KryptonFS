@@ -38,11 +38,28 @@ typedef struct kfs_cipher {
 /* In-process cipher; keys must outlive the cipher. */
 void kfs_cipher_local(kfs_cipher *c, const kfs_block_keys *keys);
 
+/* Why a replica's copy of a block was rejected. */
+typedef enum kfs_bad_copy {
+    KFS_COPY_MALFORMED, /* wrong size, or the holder sent garbage */
+    KFS_COPY_STALE,     /* not the generation the metadata expects */
+    KFS_COPY_FORGED     /* failed its authentication tag */
+} kfs_bad_copy;
+
+/*
+ * Called once per rejected copy during kfs_blockio_read(), even when
+ * another replica then serves the block, so silent corruption on one
+ * node is still reported. Runs on the reading thread.
+ */
+typedef void (*kfs_bad_copy_fn)(void *ctx, uint64_t block_id, uint32_t replica,
+                                kfs_bad_copy why);
+
 typedef struct kfs_blockio {
-    kfs_cipher   cipher;
-    kfs_backend *backend;
-    uint8_t     *scratch; /* envelope header + one block, mlocked */
-    size_t       scratch_size;
+    kfs_cipher      cipher;
+    kfs_backend    *backend;
+    uint8_t        *scratch; /* envelope header + one block, mlocked */
+    size_t          scratch_size;
+    kfs_bad_copy_fn on_bad_copy; /* optional; NULL after init */
+    void           *bad_copy_ctx;
 } kfs_blockio;
 
 kfs_status kfs_blockio_init(kfs_blockio *io, const kfs_cipher *cipher,
