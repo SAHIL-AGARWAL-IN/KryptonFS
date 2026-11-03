@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # demo-cluster.sh - A complete KryptonFS demo in one Linux environment:
 # three storage nodes, a client mounting an encrypted volume at
-# /mnt/krypton with sample files and light activity, and the dashboard in
-# tmux session "dash". Runs until stopped. Normally started by run.cmd /
+# /mnt/krypton with sample files and light activity, the Krypton Console
+# web UI on port 8080, and the terminal dashboard in tmux session "dash".
+# Runs until stopped. Normally started by run.cmd /
 # run.sh, which run it inside the dev container as root.
 #
 # Demo only: every key is generated fresh in /demo and the passphrase is
@@ -93,18 +94,53 @@ echo "Welcome to KryptonFS. This file is encrypted on disk." >"$MNT/documents/we
 echo "Ideas: an encrypted, replicated filesystem" >"$MNT/projects/notes/ideas.md"
 head -c 2000000 /dev/urandom >"$MNT/photos/sample-photo.raw"
 
-# Light, steady activity so the dashboard has something to show, plus a
-# harmful-looking write every 30 s that the scanner should block.
+# Light, steady activity so the dashboards have something to show, plus a
+# harmful-looking write every 30 s that the scanner should block. Pauses
+# while the volume is locked from the console.
 (
     i=0
-    while mountpoint -q "$MNT"; do
-        i=$((i + 1))
-        cat "$MNT/photos/sample-photo.raw" >/dev/null 2>&1
-        head -c $((RANDOM * 4)) /dev/urandom >"$MNT/projects/scratch.bin" 2>/dev/null
-        [ $((i % 60)) -eq 1 ] && printf '\x7fELF\x02\x01\x01' >"$MNT/projects/blocked-sample.elf" 2>/dev/null
+    while :; do
+        if mountpoint -q "$MNT"; then
+            i=$((i + 1))
+            cat "$MNT/photos/sample-photo.raw" >/dev/null 2>&1
+            head -c $((RANDOM * 4)) /dev/urandom >"$MNT/projects/scratch.bin" 2>/dev/null
+            [ $((i % 60)) -eq 1 ] && printf '\x7fELF\x02\x01\x01' >"$MNT/projects/blocked-sample.elf" 2>/dev/null
+        fi
         sleep 0.5
     done
 ) &
+
+# The Krypton Console. Its frontend is built here (node_modules lives in a
+# Docker volume, so packages are downloaded once) and rebuilt only when its
+# sources change. The access token goes in the link run.cmd opens.
+WEB=$SRC/webui/frontend
+build_console() {
+    command -v npm >/dev/null || { log "npm is missing: rebuild the dev image"; return 1; }
+    if [ ! -f "$WEB/node_modules/.package-lock.json" ] ||
+       [ "$WEB/package-lock.json" -nt "$WEB/node_modules/.package-lock.json" ]; then
+        log "installing the web console's packages (first run only)"
+        (cd "$WEB" && npm ci --no-audit --no-fund) >"$W/npm.log" 2>&1 ||
+            { tail -20 "$W/npm.log"; return 1; }
+    fi
+    if [ ! -f "$WEB/dist/index.html" ] || [ -n "$(find "$WEB/src" "$WEB/index.html" \
+            "$WEB"/package*.json "$WEB"/*.config.js -newer "$WEB/dist/index.html" | head -1)" ]; then
+        log "building the web console"
+        (cd "$WEB" && npm run build) >"$W/npm.log" 2>&1 || { tail -20 "$W/npm.log"; return 1; }
+    fi
+}
+build_console || log "the web console could not be built; the browser will say so"
+(umask 077 && head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=\n' >"$W/web.token")
+env -u KRYPTONFS_PASSPHRASE KFS_WEB_DEMO_PASSPHRASE="$KRYPTONFS_PASSPHRASE" \
+    KFS_WEB_STATIC="$WEB/dist" KFS_WEB_BIN="$B" PYTHONPATH="$SRC/dashboard:$SRC/webui" \
+    /opt/dash/bin/python -m kryptonfs_web serve --host 0.0.0.0 --port 8080 >"$W/web.log" 2>&1 &
+echo $! >"$W/web.pid"
+for _ in $(seq 50); do
+    /opt/dash/bin/python -c "import urllib.request as u; u.urlopen('http://127.0.0.1:8080/healthz')" \
+        2>/dev/null && break
+    sleep 0.2
+done
+kill -0 "$(cat "$W/web.pid")" 2>/dev/null || { cat "$W/web.log"; fail "web console"; }
+log "web console listening on port 8080"
 
 tmux new-session -d -s dash -x 160 -y 46 \
     "PYTHONPATH=$SRC/dashboard /opt/dash/bin/python -m kryptonfs_dash; echo; echo 'Dashboard closed. The cluster is still running.'; sleep 3"

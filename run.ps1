@@ -1,15 +1,18 @@
 <#
 .SYNOPSIS
-    Starts the KryptonFS demo: 3 storage nodes, an encrypted volume and the
-    live dashboard, inside Docker. Usually run through run.cmd.
+    Starts the KryptonFS demo: 3 storage nodes, an encrypted volume, and the
+    Krypton Console in your browser, inside Docker. Usually run through run.cmd.
 
 .EXAMPLE
-    .\run.cmd             start (or restart) the demo and open the dashboard
+    .\run.cmd             start (or restart) the demo and open the console in the browser
+    .\run.cmd -Console    open the console again
+    .\run.cmd -Dashboard  open the terminal dashboard instead
     .\run.cmd -Shell      open a Linux shell in the running demo (files: /mnt/krypton)
-    .\run.cmd -Dashboard  reopen the dashboard
     .\run.cmd -Stop       stop the demo
+    .\run.cmd -Port 8090  publish the console on another port
 #>
-param([switch]$Shell, [switch]$Dashboard, [switch]$Stop, [switch]$NoAttach)
+param([switch]$Shell, [switch]$Dashboard, [switch]$Console, [switch]$Stop, [switch]$NoAttach,
+      [int]$Port = 8080)
 
 # No $ErrorActionPreference = 'Stop': Windows PowerShell 5.1 then turns any
 # stderr line from docker into a fatal error. Exit codes are checked instead.
@@ -34,16 +37,45 @@ function Start-DockerDesktop {
     throw 'Docker Desktop did not become ready within 3 minutes.'
 }
 
+# Windows can refuse a port nothing is using (reserved ranges, security
+# software), so the console takes the first port from $Port that binds.
+function Find-FreePort([int]$from) {
+    for ($p = $from; $p -lt $from + 20; $p++) {
+        try {
+            $l = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $p)
+            $l.Start(); $l.Stop()
+            return $p
+        } catch { }
+    }
+    throw "No free port between $from and $($from + 19). Try .\run.cmd -Port 18080"
+}
+
 function Test-Running { (docker ps --filter "name=^$Name$" --format '{{.Names}}') -eq $Name }
+
+function Show-Hints {
+    Write-Host ''
+    Write-Host 'The demo is running:'
+    Write-Host '  .\run.cmd -Console     open the console in the browser again'
+    Write-Host '  .\run.cmd -Dashboard   terminal dashboard'
+    Write-Host '  .\run.cmd -Shell       Linux shell; your files are in /mnt/krypton'
+    Write-Host '  .\run.cmd -Stop        stop everything'
+}
+
+function Open-Console {
+    # Look the published port up, in case the demo was started with -Port.
+    $hostPort = ((docker port $Name 8080) | Select-Object -First 1) -replace '.*:', ''
+    $token = docker exec $Name cat /demo/web.token
+    if ($LASTEXITCODE -ne 0 -or -not $token -or -not $hostPort) {
+        throw "The console is not available. Log: docker exec $Name cat /demo/web.log"
+    }
+    Write-Host "Opening the Krypton Console: http://localhost:$hostPort"
+    Write-Host '(The link holds a private access token; it is swapped for a cookie as soon as it opens.)'
+    Start-Process "http://localhost:${hostPort}/?token=$token"
+}
 
 function Open-Dashboard {
     Write-Host 'Opening the dashboard. Press q to close it; the demo keeps running.'
     docker exec -it $Name tmux attach -t dash
-    Write-Host ''
-    Write-Host 'The demo is still running:'
-    Write-Host '  .\run.cmd -Dashboard   reopen the dashboard'
-    Write-Host '  .\run.cmd -Shell       Linux shell; your files are in /mnt/krypton'
-    Write-Host '  .\run.cmd -Stop        stop everything'
 }
 
 if ($Stop) {
@@ -54,9 +86,11 @@ if ($Stop) {
 
 Start-DockerDesktop
 
-if ($Shell -or $Dashboard) {
+if ($Shell -or $Dashboard -or $Console) {
     if (-not (Test-Running)) { throw 'The demo is not running. Start it with .\run.cmd' }
-    if ($Shell) { docker exec -it -w /mnt/krypton $Name bash } else { Open-Dashboard }
+    if ($Shell) { docker exec -it -w /mnt/krypton $Name bash }
+    elseif ($Dashboard) { Open-Dashboard; Show-Hints }
+    else { Open-Console }
     return
 }
 
@@ -64,10 +98,18 @@ Write-Host 'Preparing the Linux environment (slow the first time only)...'
 docker build -q -f docker/dev.Dockerfile -t $Image . | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Building the Docker image failed.' }
 
+# The console is published on this computer only (127.0.0.1), never on the
+# network. node_modules lives in a named volume, outside your folder.
 docker rm -f $Name *> $null
-docker run -d --name $Name --device /dev/fuse --cap-add SYS_ADMIN --cap-add IPC_LOCK `
-    -v "${PSScriptRoot}:/src" -w /src $Image bash scripts/demo-cluster.sh | Out-Null
-if ($LASTEXITCODE -ne 0) { throw 'Starting the demo container failed.' }
+$Port = Find-FreePort $Port
+docker run -d --init --name $Name --device /dev/fuse --cap-add SYS_ADMIN --cap-add IPC_LOCK `
+    -p "127.0.0.1:${Port}:8080" -v "${PSScriptRoot}:/src" `
+    -v kryptonfs-node-modules:/src/webui/frontend/node_modules `
+    -w /src $Image bash scripts/demo-cluster.sh | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    docker rm -f $Name *> $null
+    throw "Starting the demo container failed. If port $Port is taken, try .\run.cmd -Port 18080"
+}
 
 Write-Host 'Building KryptonFS and starting the cluster...'
 $shown = 0
@@ -88,4 +130,5 @@ if (-not ($logs -match '\[demo\] READY')) { throw 'The demo did not start within
 Write-Host ''
 Write-Host 'KryptonFS is running: 3 storage nodes, encrypted volume at /mnt/krypton.'
 if ($NoAttach) { return }
-Open-Dashboard
+Open-Console
+Show-Hints

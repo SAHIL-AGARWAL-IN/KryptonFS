@@ -24,5 +24,15 @@ RUN apt-get update \
  && python3 -m venv /opt/dash \
  && /opt/dash/bin/pip install --no-cache-dir textual==8.2.8 pytest
 
+# The web console: Node.js (an LTS release, copied from the official image;
+# Ubuntu's own is past end of life) builds its frontend, and its Python
+# server shares the dashboard's virtualenv.
+COPY --from=node:22.12.0-bookworm-slim /usr/local/bin/node /usr/local/bin/node
+COPY --from=node:22.12.0-bookworm-slim /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+ && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+ && /opt/dash/bin/pip install --no-cache-dir \
+        fastapi==0.115.6 "uvicorn[standard]==0.32.1" httpx==0.28.1
+
 WORKDIR /src
 CMD ["bash"]

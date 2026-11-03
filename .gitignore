@@ -3,7 +3,12 @@ build/
 build-*/
 compile_commands.json
 
-# Python (dashboard)
+# Web console (node_modules lives in a Docker volume)
+webui/frontend/node_modules/
+webui/frontend/dist/
+webui/tests/e2e-shots/
+
+# Python (dashboard, web console)
 __pycache__/
 *.py[cod]
 .venv/

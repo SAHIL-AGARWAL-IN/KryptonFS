@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body { font-size: 15px; }
+  :lang(hi) body, [lang='hi'] body { line-height: 1.65; }
+  h1, h2, h3 { text-wrap: balance; }
+  :focus-visible { outline: 2px solid theme('colors.cyan.DEFAULT'); outline-offset: 2px; }
+  ::selection { background: theme('colors.cyan.dim'); color: theme('colors.bone'); }
+  * { scrollbar-color: theme('colors.rule') transparent; }
+}
+
+@layer components {
+  .panel-title { @apply font-display text-[1.05rem] font-bold text-bone tracking-[.01em]; }
+  .btn { @apply inline-flex items-center gap-2 rounded-md border border-rule bg-deck px-3 py-1.5
+                 text-sm font-bold text-bone transition-colors hover:border-cyan
+                 disabled:cursor-not-allowed disabled:opacity-50; }
+  .btn-primary { @apply border-cyan bg-cyan text-ink hover:bg-[#5cefff]; }
+  .btn-danger { @apply border-coral-dim text-coral hover:border-coral; }
+  .field { @apply w-full rounded-md border border-rule bg-ink px-3 py-2 text-bone
+                  placeholder:text-mist focus:border-cyan focus:outline-none; }
+  .chip { @apply inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-bold; }
+  .num { font-variant-numeric: tabular-nums; }
+}
+
+/* The one orchestrated motion on the page: data travelling between the
+   volume and its servers on the cluster map. */
+@keyframes travel { from { offset-distance: 0%; opacity: 0 } 12%, 88% { opacity: 1 }
+                    to { offset-distance: 100%; opacity: 0 } }
+.packet { animation: travel var(--dur, 1.6s) linear infinite; offset-rotate: 0deg; }
+
+@keyframes blink { 0%, 92%, 100% { transform: scaleY(1) } 95% { transform: scaleY(.1) } }
+.k-eye { transform-box: fill-box; transform-origin: center; animation: blink 4.6s infinite; }
+@keyframes talk { from { transform: scaleY(.35) } to { transform: scaleY(1.2) } }
+.k-talk .k-mouth { transform-box: fill-box; transform-origin: center; animation: talk .26s infinite alternate; }
+
+@media (prefers-reduced-motion: reduce) {
+  .packet, .k-eye, .k-talk .k-mouth { animation: none !important; }
+}

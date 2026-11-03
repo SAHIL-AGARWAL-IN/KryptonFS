@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kryptonfs-web"
+version = "0.1.0"
+description = "Krypton Console: the KryptonFS web UI"
+requires-python = ">=3.11"
+dependencies = ["fastapi==0.115.6", "uvicorn[standard]==0.32.1", "kryptonfs-dash"]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "httpx==0.28.1"]
+
+[tool.setuptools]
+packages = ["kryptonfs_web"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
