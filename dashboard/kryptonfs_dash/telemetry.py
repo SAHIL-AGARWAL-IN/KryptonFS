@@ -47,6 +47,7 @@ class TelemetryState:
     tree_truncated: bool = False
     events: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=FEED))
     _seen_seq: int = 0
+    _seen_ts: int = 0
 
     def __post_init__(self) -> None:
         self.read_iops: deque[float] = deque(maxlen=self.history)
@@ -88,11 +89,16 @@ class TelemetryState:
         self.snapshot = msg
 
     def _take_events(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        # The backfill on connect can overlap the first snapshot's events.
-        fresh = [e for e in events if e.get("seq", 0) > self._seen_seq]
-        if fresh:
-            self._seen_seq = max(e.get("seq", 0) for e in fresh)
-            self.events.extend(fresh)
+        # The backfill on connect repeats events already taken, and sequence
+        # numbers restart with the daemon (a remount), so an event is new
+        # when its number or its time is past the newest one taken.
+        fresh = []
+        for e in events:
+            seq, ts = e.get("seq", 0), e.get("ts_ms", 0)
+            if seq > self._seen_seq or ts > self._seen_ts:
+                fresh.append(e)
+                self._seen_seq, self._seen_ts = seq, ts
+        self.events.extend(fresh)
         return fresh
 
 

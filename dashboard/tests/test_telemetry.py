@@ -47,6 +47,18 @@ def test_events_are_deduplicated_across_backfill_and_snapshots():
     assert len(s.events) == 4
 
 
+def test_events_survive_a_daemon_restart():
+    s = TelemetryState()
+    ev = lambda seq, ts: {"seq": seq, "ts_ms": ts, "msg": f"{seq}@{ts}"}  # noqa: E731
+    s.apply({"type": "events", "events": [ev(n, 1000 + n) for n in range(1, 9)]})
+    # A remount: the new daemon numbers its events from 1 again.
+    fresh = s.apply({"type": "events", "events": [ev(1, 5000), ev(2, 5001)]})
+    assert [e["ts_ms"] for e in fresh] == [5000, 5001]
+    # Reconnecting to that daemon replays what was already taken.
+    assert s.apply({"type": "events", "events": [ev(1, 5000), ev(2, 5001), ev(3, 5002)]}) == [ev(3, 5002)]
+    assert len(s.events) == 11
+
+
 def test_tree_message():
     s = TelemetryState()
     s.apply({"type": "tree", "entries": [{"path": "/", "dir": True}], "truncated": True})
