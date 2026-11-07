@@ -3,8 +3,11 @@
 A distributed, encrypted virtual filesystem for Linux. Files are encrypted
 per block on the client (AES-256-CTR + HMAC-SHA256) inside sandboxed worker
 processes, then replicated as ciphertext across storage nodes over an
-authenticated TCP block protocol. A terminal dashboard shows I/O, cluster
-health and security events.
+authenticated TCP block protocol. The Krypton Console, a web app, shows and
+drives all of it: live I/O and cluster health, a file manager that reveals
+what the servers really store, server and lock controls, an attack lab, and
+a guided learn mode in English and Hindi. A terminal dashboard is included
+too.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design, threat
 model and full project layout.
@@ -14,19 +17,24 @@ model and full project layout.
 All you need is [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 (Windows, macOS) or Docker (Linux). One command builds everything and starts
 a working demo: three storage nodes, an encrypted volume with sample files,
-and the live dashboard.
+and the Krypton Console in your browser.
 
-| Windows (double-click or PowerShell) | Linux / macOS     | What it does                                  |
-|--------------------------------------|-------------------|-----------------------------------------------|
-| `run.cmd`                            | `./run.sh`        | start the demo and open the dashboard         |
-| `run.cmd -Dashboard`                 | `./run.sh dashboard` | reopen the dashboard                       |
-| `run.cmd -Shell`                     | `./run.sh shell`  | Linux shell inside it; your files are in `/mnt/krypton` |
-| `run.cmd -Stop`                      | `./run.sh stop`   | stop everything                               |
+| Windows (double-click or PowerShell) | Linux / macOS        | What it does                                  |
+|--------------------------------------|----------------------|-----------------------------------------------|
+| `run.cmd`                            | `./run.sh`           | start the demo and open the console           |
+| `run.cmd -Console`                   | `./run.sh console`   | open the console again                        |
+| `run.cmd -Dashboard`                 | `./run.sh dashboard` | the terminal dashboard (`q` closes it)        |
+| `run.cmd -Shell`                     | `./run.sh shell`     | Linux shell inside it; your files are in `/mnt/krypton` |
+| `run.cmd -Stop`                      | `./run.sh stop`      | stop everything                               |
 
 On Windows, `run.cmd` starts Docker Desktop for you if it is not running.
 The first start takes a few minutes to download and build; later starts take
-seconds. In the dashboard press `q` to close it; the demo keeps running.
+seconds. The console listens on this computer only, at
+`http://localhost:8080` (or the next free port), and the link `run.cmd`
+opens carries a one-time access token.
 
+In the console, turn on **Learn** and take the tour, upload a file and open
+*What the servers store*, then run the attacks in the **Attack lab**.
 Things to try in the shell: `ls -R /mnt/krypton` (your files, decrypted),
 `ls -R /demo/data1` (what a storage node actually holds: encrypted blocks
 only), or `printf '\x7fELF' > /mnt/krypton/x` (blocked by the malware
@@ -129,6 +137,35 @@ start as root so it can jail its workers, stays in the foreground (run it
 under systemd or similar), and unmounts cleanly with `fusermount3 -u` or
 Ctrl-C. Writes rejected by the malware scanner fail with "Permission
 denied" and are logged to syslog.
+
+## Web console
+
+The Krypton Console (`webui/`) is a FastAPI server and a React + Tailwind +
+Chart.js app. The server reads the same telemetry socket as the dashboard
+and works on the real mount, so every upload is scanned, encrypted and
+replicated like any other write.
+
+- **Overview:** the cluster map (packets flowing to each server, blocks per
+  server), I/O charts, protection status, security feed and mount tree
+- **Files:** browse, upload (drag and drop), download, rename, delete, and
+  *What the servers store*: each block's copies, the server that holds
+  them, and the ciphertext beside your plaintext
+- **Cluster:** stop, crash and restart storage servers; lock and unlock the
+  volume
+- **Attack lab** (demo only): upload malware, tamper with a stored block,
+  crash a server, and see each step of the defence
+- **Learn** mode with Krypto and a guided tour, in English or हिंदी, and an
+  **Advanced** toggle with raw figures for developers
+
+Developing it: `run.cmd` builds the frontend when its sources change. For
+hot reload, run `npm run dev` in `webui/frontend` with the demo running
+(it proxies `/api` and `/ws` to it; set `KFS_CONSOLE` if the console is not
+on port 8080). Tests: `pytest webui/tests` (with `PYTHONPATH=dashboard:webui`),
+`npm test` in `webui/frontend`, and `webui/tests/e2e_smoke.sh`, which drives
+a real browser through every feature against the running demo.
+
+To put it on a server for a few people with one shared password, behind
+HTTPS, see [deploy/DEPLOY.md](deploy/DEPLOY.md).
 
 ## Dashboard
 

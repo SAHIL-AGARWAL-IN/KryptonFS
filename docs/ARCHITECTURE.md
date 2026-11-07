@@ -50,7 +50,9 @@ copy is accepted only if its tag verifies (`OPEN`, in the crypto pool) and
 its generation is the one metadata expects; a stale replica that missed a
 write, or a tampered copy, is skipped for the next replica. If no replica
 has an acceptable copy, the read fails with `EIO`, never garbage
-plaintext.
+plaintext. Every rejected copy is reported as an `integrity` event (an
+alert for a forged or malformed copy, a warning for a stale one), so a
+damaged node is visible even when another replica serves the read.
 
 ### Telemetry
 
@@ -63,6 +65,13 @@ dashboard that falls behind is disconnected rather than allowed to stall
 the daemon. The socket is mode 0600, since the tree carries decrypted
 names, and file names that are not valid UTF-8 are sent as U+FFFD so the
 stream always parses.
+
+The Krypton Console's server (root, like the daemon) holds one connection
+to this socket and fans each message out to browsers over a WebSocket,
+with a bounded queue per browser: a slow browser is dropped, never the
+daemon's stream. Event sequence numbers restart with the daemon, so
+clients treat an event as new when its number or its time is past the
+newest one seen.
 
 ## Wire formats
 
@@ -169,7 +178,7 @@ Places where the implementation goes beyond the letter of the spec:
 | Node-to-node authentication           | Clients authenticate the same way, with their own identity | A storage node should only serve hosts it can name. |
 | Replication logic on nodes            | Rendezvous placement; the receiving node forwards to the other replicas | Every host computes replica sets alone; adding a node moves only the blocks it wins. |
 | C or C++                              | C11 throughout                                             | FUSE, SysV IPC, sockets and OpenSSL are C APIs; one toolchain. |
-| Textual TUI or web dashboard          | Textual TUI                                                | Runs over SSH beside the daemon, with no JS build. |
+| Textual TUI or web dashboard          | Both: Textual TUI, and the Krypton Console (FastAPI + React) | The TUI runs over SSH with no JS build; the console adds file management, controls and a guided mode for people who are not at a terminal. |
 
 ## Project structure
 
@@ -186,7 +195,7 @@ KryptonFS/
 ├── config/
 │   └── kryptonfs.conf.example         [P1] every key, documented
 ├── docker/
-│   └── dev.Dockerfile                 [P1] Linux toolchain for non-Linux hosts
+│   └── dev.Dockerfile                 [P1] Linux toolchain (+ Node) for non-Linux hosts
 ├── docs/
 │   └── ARCHITECTURE.md                [P1] this file
 ├── include/krypton/                   public headers shared by all components
@@ -245,6 +254,31 @@ KryptonFS/
 ├── tools/
 │   ├── kfs-keygen.c                   [P2] RSA-2048 key pair + cluster key
 │   └── kfs-mkvol.c                    [P3] volume header + empty root directory
+├── webui/                             Krypton Console (web UI)
+│   ├── pyproject.toml
+│   ├── kryptonfs_web/
+│   │   ├── __main__.py                serve | hash-password
+│   │   ├── settings.py                KFS_WEB_* settings, demo / production
+│   │   ├── auth.py                    PBKDF2 password, signed sessions, throttle
+│   │   ├── server.py                  app, access guard, security headers, /ws
+│   │   ├── hub.py                     one telemetry stream, many browsers
+│   │   ├── files.py                   file manager, stored-blocks view
+│   │   └── cluster.py                 node control, lock/unlock, attack lab
+│   ├── frontend/                      React + Tailwind + Chart.js (Vite)
+│   │   └── src/
+│   │       ├── App.jsx                rail, status bar, views
+│   │       ├── components/            ClusterMap, IoPanel, Security, FilesView,
+│   │       │                          ClusterView, AttackLab, Learn, Krypto, Login
+│   │       ├── lib/                   telemetry reducer, API client, formatting
+│   │       ├── i18n/                  en.js, hi.js
+│   │       └── test/                  vitest
+│   └── tests/                         pytest (API), e2e_smoke (Playwright)
+├── deploy/                            one-server production setup
+│   ├── Dockerfile                     Release build + console, no toolchain
+│   ├── docker-compose.yml             KryptonFS + Caddy (HTTPS)
+│   ├── Caddyfile
+│   ├── entrypoint.sh                  init | serve | hash-password
+│   └── DEPLOY.md
 ├── dashboard/                         [P5] Python 3.11+, Textual
 │   ├── pyproject.toml
 │   ├── kryptonfs_dash/

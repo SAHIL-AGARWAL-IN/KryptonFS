@@ -25,3 +25,6 @@ keys/
 *.swp
 .DS_Store
 Thumbs.db
+
+# Deployment secrets
+deploy/.env

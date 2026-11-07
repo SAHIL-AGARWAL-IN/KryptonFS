@@ -1,0 +1,13 @@
+# Only deploy/Dockerfile copies from the context; keep it small and free
+# of build output, local secrets and dependencies.
+.git
+build/
+build-*/
+**/node_modules
+webui/frontend/dist
+webui/tests/e2e-shots
+**/__pycache__
+.venv
+deploy/.env
+*.pem
+*.key

@@ -1,0 +1,59 @@
+# KryptonFS on one server, behind HTTPS. See DEPLOY.md.
+#
+#   docker compose run --rm kryptonfs hash-password   # once, into .env
+#   docker compose run --rm kryptonfs init            # once
+#   docker compose up -d
+
+name: kryptonfs
+
+services:
+  kryptonfs:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    # FUSE inside a container needs the device, mount rights, and (on hosts
+    # with AppArmor, such as Ubuntu) its default profile lifted, because
+    # that profile forbids mount(2). IPC_LOCK keeps keys out of swap.
+    devices: [/dev/fuse]
+    cap_add: [SYS_ADMIN, IPC_LOCK]
+    security_opt: [apparmor:unconfined]
+    environment:
+      KFS_WEB_PASSWORD_HASH: ${KFS_WEB_PASSWORD_HASH:-}
+      KFS_WEB_PUBLIC_URL: https://${KFS_DOMAIN:?set KFS_DOMAIN in .env}
+      KFS_WEB_TRUSTED_PROXIES: 172.30.0.2   # Caddy, below
+      KFS_WEB_MAX_UPLOAD_MB: ${KFS_WEB_MAX_UPLOAD_MB:-256}
+    volumes:
+      - kryptonfs-state:/var/lib/kryptonfs
+    networks:
+      internal: {}
+    # No ports: only Caddy is reachable from outside.
+
+  caddy:
+    image: caddy:2.8.4
+    restart: unless-stopped
+    depends_on: [kryptonfs]
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      KFS_DOMAIN: ${KFS_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      internal:
+        ipv4_address: 172.30.0.2
+
+networks:
+  internal:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+          ip_range: 172.30.0.128/25   # automatic addresses; Caddy's .2 stays free
+
+volumes:
+  kryptonfs-state:   # keys, configs and every node's encrypted blocks
+  caddy-data:        # TLS certificates
+  caddy-config:

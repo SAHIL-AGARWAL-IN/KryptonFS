@@ -1,0 +1,10 @@
+# HTTPS in front of the Krypton Console. Caddy obtains and renews the
+# certificate for $KFS_DOMAIN automatically; WebSockets pass through.
+{$KFS_DOMAIN} {
+	encode zstd gzip
+	request_body {
+		max_size 300MB
+	}
+	header Strict-Transport-Security "max-age=31536000"
+	reverse_proxy kryptonfs:8080
+}
