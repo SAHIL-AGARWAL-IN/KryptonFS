@@ -729,6 +729,9 @@ int main(int argc, char **argv)
          * The kernel enforces permissions from the stored modes. */
         fuse_opt_add_arg(&args, "-f");
         fuse_opt_add_arg(&args, "-odefault_permissions,allow_other,fsname=kryptonfs,subtype=kryptonfs");
+        /* libfuse 3.14's default ("unlimited") is rejected by its own idle-
+         * thread setter with a bogus warning; 10 was the old default. */
+        fuse_opt_add_arg(&args, "-omax_idle_threads=10");
         if (cli.mountpoint == NULL)
             fuse_opt_add_arg(&args, d.cfg.volume.mountpoint);
         start_telemetry(&d, cli.mountpoint != NULL ? cli.mountpoint : d.cfg.volume.mountpoint,
