@@ -76,7 +76,8 @@ export function Feed({ events }) {
   return (
     <ol className="max-h-80 space-y-1.5 overflow-y-auto pr-1">
       {[...events].reverse().slice(0, 80).map((e) => (
-        <li key={e.seq} className={`rounded-r border-l-[3px] py-1.5 pl-3 pr-2 ${LEVEL[e.level] ?? LEVEL.info}`}>
+        // seq restarts with the daemon, so it alone is not unique.
+        <li key={`${e.ts_ms}-${e.seq}`} className={`rounded-r border-l-[3px] py-1.5 pl-3 pr-2 ${LEVEL[e.level] ?? LEVEL.info}`}>
           <div className="num flex gap-2 text-xs text-mist">
             <span>{clock(e.ts_ms)}</span>
             <span className={e.level === 'info' ? 'text-cyan' : 'font-bold text-coral'}>{e.kind}</span>

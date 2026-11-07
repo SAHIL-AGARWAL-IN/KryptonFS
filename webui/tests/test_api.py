@@ -242,6 +242,15 @@ def test_blocks_view_finds_copies_on_nodes(demo):
     assert v["plainText"].startswith("PPP")
 
 
+def test_preview_does_not_split_characters(demo):
+    c, tmp = demo
+    text = "मीटिंग नोट्स: नई वेबसाइट शुक्रवार को लॉन्च होगी"   # 3 bytes per letter
+    (tmp / "mnt/notes.txt").write_text(text, encoding="utf-8")
+    v = c.get("/api/files/blocks?path=/notes.txt").json()
+    assert "�" not in v["plainText"] and text.startswith(v["plainText"])
+    assert len(v["plainText"].encode()) > files_mod.HEX_PREVIEW - 4
+
+
 # --- cluster controls -------------------------------------------------------------
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="needs /proc")

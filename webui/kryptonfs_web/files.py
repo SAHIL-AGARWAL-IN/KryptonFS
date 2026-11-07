@@ -10,6 +10,7 @@ outside the encrypted volume.
 from __future__ import annotations
 
 import asyncio
+import codecs
 import errno
 import math
 import os
@@ -231,12 +232,19 @@ async def blocks(request: Request, path: str) -> dict[str, Any]:
             rows.append({"index": index, "copies": stored_copies(s, info.st_ino, index)})
         return {"path": volume_path(request, f), "inode": info.st_ino, "size": info.st_size,
                 "blockSize": bs, "blockCount": n, "shown": len(rows), "blocks": rows,
-                "plainHex": plain.hex(), "plainText": plain.decode("utf-8", "replace")}
+                "plainHex": plain.hex(), "plainText": _preview_text(plain)}
 
     try:
         return await asyncio.to_thread(gather)
     except OSError as exc:
         raise os_error(exc, f"Reading {f.name}") from exc
+
+
+def _preview_text(data: bytes) -> str:
+    """Decodes a prefix of a file. The cut can fall inside a multi-byte
+    character (Hindi text, say); that partial character is left out
+    rather than shown as a replacement mark."""
+    return codecs.getincrementaldecoder("utf-8")("replace").decode(data)
 
 
 def _commit(f) -> None:
