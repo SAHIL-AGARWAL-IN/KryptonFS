@@ -37,8 +37,10 @@ function Start-DockerDesktop {
     throw 'Docker Desktop did not become ready within 3 minutes.'
 }
 
-# Windows can refuse a port nothing is using (reserved ranges, security
-# software), so the console takes the first port from $Port that binds.
+# Windows can refuse a port nothing is using: Hyper-V and WSL reserve
+# blocks of ports (often hundreds around 8080), and the blocks move after a
+# reboot. The console takes the first port from $Port that binds, and
+# otherwise any free port the system hands out.
 function Find-FreePort([int]$from) {
     for ($p = $from; $p -lt $from + 20; $p++) {
         try {
@@ -47,7 +49,11 @@ function Find-FreePort([int]$from) {
             return $p
         } catch { }
     }
-    throw "No free port between $from and $($from + 19). Try .\run.cmd -Port 18080"
+    $l = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+    $l.Start()
+    $p = $l.LocalEndpoint.Port
+    $l.Stop()
+    return $p
 }
 
 function Test-Running { (docker ps --filter "name=^$Name$" --format '{{.Names}}') -eq $Name }
